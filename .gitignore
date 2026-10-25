@@ -1,0 +1,28 @@
+# Read-only reference material (never commit)
+OG_knowledge_base/
+
+# Large or generated data: fetched or produced by scripts, not committed
+*.hdf5
+*.h5
+*.fits
+*.npz
+*.npy
+outputs/
+runs/
+test_data/
+*.con
+*.out
+*.ovr
+*.per
+
+# Python / Jupyter
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/

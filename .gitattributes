@@ -1,0 +1,5 @@
+# Jupyter notebooks are committed without outputs: git runs nbstripout on them at commit time
+# (one-time setup per clone: pip install nbstripout; nbstripout --install). Your working copy
+# keeps its outputs.
+*.ipynb filter=nbstripout
+*.ipynb diff=ipynb

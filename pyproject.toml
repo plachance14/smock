@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Dependencies are installed by hand (see SETUP.txt), so none are listed here:
+#     pip install --no-deps -e .
+[project]
+name = "smock"
+version = "0.1.0"
+description = "Synthesizer-based JWST mock observations of ASTRID and AMBRA galaxies"
+requires-python = ">=3.12"
+
+[tool.setuptools]
+packages = ["smock"]

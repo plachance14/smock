@@ -1,0 +1,138 @@
+Setting up smock
+================
+
+You'll need to do three things during setup:
+1. Download smock and its data (about 5 GB)
+2. Create a new Python environment and install smock into it
+3. Tell synthesizer and smock where the data is
+
+Once you have done those things, step through the walkthrough notebook to check everything works.
+
+
+1. Get smock and the data
+-------------------------
+Depending on how storage and such works on your machine, I would download smock and its data in a place where you are allowed to use some storage, rather than say, your home directory.
+
+Additionally, since these are pieces of code and data that you install and might want to use in multiple places, I'd consider putting them (along with other programs, packages, etc. that you download and/or install) into a "source" folder. The paths to smock and the two data folders might then look like:
+
+    /path/to/projects/source/smock/
+    /path/to/projects/source/smock/test_data/
+    /path/to/projects/source/synthesizer_data/
+
+Get smock:
+
+    cd /path/to/projects/source/
+    git clone https://github.com/plachance14/smock.git
+
+Then download the smock data folder, smock_data, from Google Drive:
+
+    https://drive.google.com/drive/folders/1aruCXByevDyer_LeufUUbo_knz311sDV?usp=sharing
+
+In a browser, Google Drive gives you the folder as one or more zip files: unzip them all in
+the same place. On a cluster you can download it directly with gdown ("pip install gdown"):
+
+    gdown --folder https://drive.google.com/drive/folders/1aruCXByevDyer_LeufUUbo_knz311sDV
+
+If Google stops gdown partway (a message about "many accesses"), wait a while and run the
+same command again with --continue added: it skips the files it already has.
+
+This "smock_data" folder holds:
+
+    synthesizer_data/   grids/                 the stellar grid (BPASS 2.2.1) and our AGN grids
+                        instrument_cache/psfs/ our JWST/NIRCam PSFs, one per filter
+                        svo_filter_cache/      the seven NIRCam filter curves the notebooks use
+    test_data.zip       a small cutout of the ASTRID simulation: five galaxy groups at
+                        z = 6 (17 MB unzipped), enough to run everything without the full snapshots
+
+Put synthesizer_data/ in your source folder (or wherever you like), and unzip
+test_data.zip inside your smock folder, which gives smock/test_data/:
+
+    cd /path/to/projects/source/smock
+    unzip /path/to/smock_data/test_data.zip
+
+If in the future you decide to branch out and use other synthesizer data (different grids,
+instruments, etc.), I would advise you to keep it all in this one synthesizer_data folder,
+following the same organization, which also follows synthesizer's own (its grids are sorted
+by stellar or AGN, then incident or photoionised; see https://synthesizer-project.org/syndex).
+
+
+2. The Python environment
+-------------------------
+With conda (any recent conda or miniforge):
+
+    conda create -n smock_env python=3.12 pip
+    conda activate smock_env
+    pip install numpy cython
+    pip install --no-build-isolation bigfile
+    pip install cosmos-synthesizer "photutils>=3.0" statmorph ipykernel
+
+bigfile requires both numpy and cython to be present, which is why we install them first.
+photutils must be 3.0 or newer, as we use features that were introduced in version 3.0.
+
+Then install smock into the environment:
+
+    cd /path/to/projects/source/smock
+    pip install --no-deps -e .
+
+Optional, but needed to open the notebooks with this environment: register it as a Jupyter "kernel":
+
+    python -m ipykernel install --user --name smock_env
+
+This adds "smock_env" to the kernel list in Jupyter and VS Code, so you can pick it when you
+open the walkthrough. You only need to do it once.
+
+Optional: "pip install jupyterlab" for the Jupyter Lab interface, and "pip install pytest"
+to run the tests ("python -m pytest" from the smock folder; a couple of minutes).
+
+smock was tested with synthesizer 1.3.1. If a newer synthesizer breaks something, you can try one or multiple of the following:
+- downgrade to version 1.3.1 ("pip install cosmos-synthesizer==1.3.1")
+- make changes to the smock code that breaks to align it with the new synthesizer functionality
+- get in touch with me (section 5) and I'll try to fix it or tell you how.
+
+
+3. Paths
+--------
+Tell synthesizer and smock where synthesizer_data/ is, e.g. in your ~/.bashrc:
+
+    export SYNTHESIZER_DIR=/path/to/projects/source/synthesizer_data
+
+This is synthesizer's own setting, so synthesizer and smock both use that folder.
+Then, as synthesizer recommends, open a new terminal (so the setting takes effect),
+activate the environment, and run synthesizer's setup and report commands:
+
+    synthesizer-init
+    synthesizer-report
+
+synthesizer-init adds a few things of synthesizer's own to the folder: its settings file
+(default_units.yml) and some empty folders.
+synthesizer-report lists the folders synthesizer is using: check that "Grids directory" is
+synthesizer_data/grids and "Instrument cache directory" is synthesizer_data/instrument_cache.
+smock uses the same ones. Don't worry about the ✖ marks next to each folder, or the
+suggestions to set more variables: they don't mean anything went wrong, and SYNTHESIZER_DIR
+is all you need. (If you already point synthesizer at folders of your own with
+SYNTHESIZER_GRID_DIR or SYNTHESIZER_INSTRUMENT_CACHE, smock uses those too: put the contents
+of our grids/ and instrument_cache/ in them.)
+
+Optional: SMOCK_OUTPUT_DIR sets where spectra, images and plots go (default: smock/outputs/).
+
+While the tests can be performed with the provided test data, if you are looking to analyze more simulation data from ASTRID and/or AMBRA, you will need to provide the paths to those simulations.
+
+On Vera (PSC) their locations are already in smock/config.py. On another machine, add your paths to the "local" entry there.
+
+
+4. Check it works
+-----------------
+Open the walkthrough notebook (notebooks/walkthrough.ipynb) in Jupyter or VS Code with the "smock_env" kernel
+and step through it cell by cell, reading the notes as you go.
+It mocks up one galaxy from the test data, and each step shows what synthesizer and smock are doing, so it's the best way to begin to understand the code as well as a check that everything works.
+
+It needs up to about 5 GB of memory. On a cluster, run it on a compute node (or wherever your
+cluster allows that much memory usage), e.g. in an interactive job.
+On Vera, either ask SLURM for the memory explicitly (e.g. --mem=16G), or for multiple cores (e.g. -n 4) because the default
+per core is less than 5 GB.
+
+
+5. Questions and problems
+-------------------------
+Open an issue on the GitHub repository (https://github.com/plachance14/smock/issues),
+or email me (Patrick LaChance), p.lachance@soton.ac.uk.
