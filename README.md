@@ -1,6 +1,6 @@
 # smock
 
-Mock JWST/NIRCam observations of galaxies from the ASTRID and AMBRA simulations (MP-Gadget),
+Mock JWST/NIRCam observations of galaxies from the ASTRID and AMBRA simulations,
 made with [synthesizer](https://synthesizer-project.github.io/synthesizer/).
 
 Pick a galaxy by its subhalo index, FoF group or black hole ID, and smock reads its stars, gas
