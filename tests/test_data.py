@@ -1,4 +1,6 @@
 """Known-answer tests for smock.data: unit conversions, lookups and the three entry points."""
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from astropy.cosmology import FlatLambdaCDM
@@ -170,6 +172,18 @@ def test_unknown_bh_and_bad_arguments(snap):
         load_galaxy(snap, sidx=0, gidx=0)
 
 
+def test_observed_z_changes_no_particle_values(snap):
+    plain = load_galaxy(snap, sidx=0, particles="subhalo")
+    moved = load_galaxy(snap, sidx=0, particles="subhalo", observed_z=0.2)
+    assert (plain.observed_z, plain.observed_redshift) == (None, pytest.approx(3.0))
+    assert (moved.observed_z, moved.redshift) == (0.2, plain.redshift)
+    for part in ("stars", "gas", "bhs"):
+        a, b = getattr(plain, part), getattr(moved, part)
+        assert a.keys() == b.keys()
+        for k in a:
+            assert np.array_equal(np.asarray(a[k]), np.asarray(b[k])), (part, k)
+
+
 def test_physical_units(snap):
     gal = load_galaxy(snap, sidx=0, particles="subhalo")
     s, g, b = gal.stars, gal.gas, gal.bhs
@@ -215,6 +229,26 @@ def test_crop_length_units():
     assert crop_length_kpc(gal, 1.5, "r_half") == pytest.approx(3.0)
     with pytest.raises(ValueError):
         crop_length_kpc(gal, 1.0, "pc")
+
+
+def test_crop_length_at_an_observed_redshift():
+    # a z = 3 snapshot observed at z = 0.5: arcsec use z = 0.5, comoving units stay at a = 1/4
+    gal = replace(toy_galaxy([[1.0, 0, 0]], [[0.0, 0, 0]]), observed_z=0.5)
+    assert gal.observed_redshift == 0.5
+    expected = 2.0 / gal.cosmo.arcsec_per_kpc_proper(0.5).value
+    assert crop_length_kpc(gal, 2.0, "arcsec") == pytest.approx(expected, rel=1e-12)
+    # Einstein-de Sitter by hand at z = 0.5: D_A = (2c/H0) (1 - 1/sqrt(1.5)) / 1.5
+    d_a_kpc = 2 * 299792.458 / 50.0 * (1 - 1 / np.sqrt(1.5)) / 1.5 * 1e3
+    assert crop_length_kpc(gal, 1.0, "arcsec") == pytest.approx(d_a_kpc * np.pi / 180 / 3600, rel=1e-6)
+    assert crop_length_kpc(gal, 100.0, "ckpc/h") == pytest.approx(100.0 * 0.25 / 0.5)
+    assert crop(gal, 1.0, "kpc", gas_margin_ckpch=1.0).crop["gas_margin_kpc"] == pytest.approx(0.5)
+
+
+def test_arcsec_crop_at_redshift_zero_asks_for_observed_z():
+    gal = toy_galaxy([[1.0, 0, 0]], [[0.0, 0, 0]], z=0.0)
+    with pytest.raises(ValueError, match="observed_z"):
+        crop_length_kpc(gal, 1.0, "arcsec")
+    assert crop_length_kpc(replace(gal, observed_z=0.1), 1.0, "arcsec") > 0
 
 
 @pytest.mark.parametrize("shape, kept", [("cylinder", [0, 2]), ("prism", [0, 1, 2]), ("cube", [1])])

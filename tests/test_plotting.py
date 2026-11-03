@@ -9,7 +9,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from matplotlib.colors import LogNorm  # noqa: E402
 
-from smock.plotting import (apply_norm, asinh_norm, channel_stack, display_window, pixel_size,  # noqa: E402
+from smock.plotting import (apply_norm, asinh_norm, channel_stack, display_window, observed_redshift, pixel_size,  # noqa: E402
                             plot_2x2, plot_image_and_spectrum, plot_rgb, plot_spectrum,
                             rgb_filters_for, show_image)
 
@@ -76,6 +76,14 @@ def test_pixel_size_units():
     assert pixel_size(META, "ckpc/h") == pytest.approx(0.175 * 7.0 * 0.6774)
     with pytest.raises(ValueError):
         pixel_size(META, "pc")
+
+
+def test_observed_redshift_and_comoving_pixels():
+    assert observed_redshift(META) == 6.0                       # older files: the snapshot's
+    moved = {**META, "observed_z": 0.1}
+    assert observed_redshift(moved) == 0.1
+    # comoving pixel sizes stay on the snapshot's redshift
+    assert pixel_size(moved, "ckpc/h") == pixel_size(META, "ckpc/h")
 
 
 def test_figures_run_on_synthetic_files():

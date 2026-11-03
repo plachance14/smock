@@ -252,6 +252,10 @@ class Galaxy:
     gas:   coordinates [kpc], masses [Msun], metallicities, smoothing_lengths [kpc],
            star_formation_rates [Msun/yr]
     bhs:   ids, coordinates [kpc], masses [Msun] (BlackholeMass), accretion_rates [Msun/yr]
+
+    redshift is the snapshot's: ages, comoving units and the dust opacity use it.
+    observed_z is the redshift the galaxy is observed at (distance, angular scale, IGM,
+    observed-frame filters); None means the snapshot's (see observed_redshift).
     """
     redshift: float
     h: float                   # from the snapshot header
@@ -267,6 +271,12 @@ class Galaxy:
     gas: dict
     bhs: dict
     crop: dict | None = None   # set by crop(): what was kept
+    observed_z: float | None = None
+
+    @property
+    def observed_redshift(self):
+        """The redshift the galaxy is observed at: observed_z if set, else the snapshot's."""
+        return self.redshift if self.observed_z is None else self.observed_z
 
 
 def _stars(snap, start, length, centre, smoothing_k=STAR_SMOOTHING_K):
@@ -329,7 +339,7 @@ def stellar_shrinking_sphere_centre(snap, start, length):
 
 
 def load_galaxy(snap, *, sidx=None, gidx=None, bhid=None, particles="group", centre="catalogue",
-                star_smoothing_k=STAR_SMOOTHING_K):
+                star_smoothing_k=STAR_SMOOTHING_K, observed_z=None):
     """Particles of one galaxy, chosen by exactly one of sidx, gidx or bhid.
 
     particles: "group" (default: the whole FoF group, fuzz included, so neighbours in the
@@ -344,6 +354,10 @@ def load_galaxy(snap, *, sidx=None, gidx=None, bhid=None, particles="group", cen
         Image-based recentring (e.g. for compactness) comes later, in the analysis step.
     star_smoothing_k: star smoothing length = distance to the k-th nearest loaded star,
         itself included (default 60; the old pipeline used 32).
+    observed_z: observe the galaxy at this redshift instead of the snapshot's (None, the
+        default). It sets the distance and the arcsec scale; the particles, their ages and
+        unit conversions stay those of the snapshot. Needed for a z = 0 snapshot, which
+        synthesizer would place 10 pc away.
     """
     if sum(x is not None for x in (sidx, gidx, bhid)) != 1:
         raise ValueError("give exactly one of sidx, gidx, bhid")
@@ -383,7 +397,8 @@ def load_galaxy(snap, *, sidx=None, gidx=None, bhid=None, particles="group", cen
                   centre_ckpch=centre_ckpch, centre_method=method,
                   stars=_stars(snap, start, length, centre_ckpch, star_smoothing_k),
                   gas=_gas(snap, start, length, centre_ckpch),
-                  bhs=_bhs(snap, start, length, centre_ckpch))
+                  bhs=_bhs(snap, start, length, centre_ckpch),
+                  observed_z=None if observed_z is None else float(observed_z))
 
 
 # ---- cropping (line of sight along z) ------------------------------------------------
@@ -407,11 +422,12 @@ def projected_half_mass_radius(coords, masses):
 
 
 def crop_length_kpc(galaxy, size, unit):
-    """A crop size given in `unit` -> physical kpc, at the galaxy's redshift.
+    """A crop size given in `unit` -> physical kpc.
 
-    unit: "kpc" (physical), "ckpc/h", "arcsec", or "r_half": multiples of the projected
-        half-mass radius of the loaded stars, from their current masses (as the old
-        pipeline's "stellar_r_half").
+    unit: "kpc" (physical), "ckpc/h" (at the snapshot's redshift), "arcsec" (at the
+        observed redshift, galaxy.observed_redshift), or "r_half": multiples of the
+        projected half-mass radius of the loaded stars, from their current masses (as the
+        old pipeline's "stellar_r_half").
     """
     a = 1.0 / (1.0 + galaxy.redshift)
     if unit == "kpc":
@@ -419,7 +435,11 @@ def crop_length_kpc(galaxy, size, unit):
     if unit == "ckpc/h":
         return float(ckpch_to_kpc(size, a, galaxy.h))
     if unit == "arcsec":
-        return float(size / galaxy.cosmo.arcsec_per_kpc_proper(galaxy.redshift).value)
+        z_obs = galaxy.observed_redshift
+        if z_obs <= 0:
+            raise ValueError(f"an arcsec size needs a redshift above 0 (this galaxy is observed at "
+                             f"z = {z_obs}); give load_galaxy an observed_z")
+        return float(size / galaxy.cosmo.arcsec_per_kpc_proper(z_obs).value)
     if unit == "r_half":
         s = galaxy.stars
         return float(size * projected_half_mass_radius(s["coordinates"].to("kpc").value,
@@ -451,7 +471,7 @@ def crop(galaxy, size, unit="arcsec", shape="prism", gas_margin_ckpch=OLD_GAS_MA
     if shape not in CROP_SHAPES:
         raise ValueError(f"shape must be one of {CROP_SHAPES}")
     size_kpc = crop_length_kpc(galaxy, size, unit)
-    margin_kpc = float(ckpch_to_kpc(gas_margin_ckpch, 1.0 / (1.0 + galaxy.redshift), galaxy.h))
+    margin_kpc = float(ckpch_to_kpc(gas_margin_ckpch, 1.0 / (1.0 + galaxy.redshift), galaxy.h))   # snapshot's a
 
     def keep(part, half_kpc):
         mask = _inside(part["coordinates"], half_kpc, shape)

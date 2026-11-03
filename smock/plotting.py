@@ -114,6 +114,13 @@ def show_image(ax, image, start=(0, 0), **imshow_kwargs):
     return ax
 
 
+def observed_redshift(meta):
+    """The redshift the galaxy was observed at: meta["observed_z"], else the snapshot's
+    meta["redshift"] (files written before observed_z existed have only the latter)."""
+    z = meta.get("observed_z")
+    return meta["redshift"] if z is None else z
+
+
 def pixel_size(meta, unit):
     """Size of one pixel in unit: "arcsec", "kpc" (physical) or "ckpc/h" (comoving)."""
     if unit == "arcsec":
@@ -121,6 +128,7 @@ def pixel_size(meta, unit):
     if unit == "kpc":
         return meta["pixel_pkpc"]
     if unit == "ckpc/h":
+        # comoving units belong to the snapshot, so its redshift, not the observed one
         return meta["pixel_pkpc"] * (1 + meta["redshift"]) * meta["cosmology"]["H0"] / 100.0
     raise ValueError(f"unit must be 'arcsec', 'kpc' or 'ckpc/h', not {unit!r}")
 
@@ -172,7 +180,7 @@ def plot_rgb(images, meta, stage="total_noisy", rgb=None, norm=asinh_norm, displ
     """One RGB panel of an images file (smock.io.load_images).
 
     stage:          which stack, e.g. "total_noisy", "total_psf", "stellar_psf"
-    rgb:            (R, G, B) filter names; None picks them from the redshift (rgb_filters_for)
+    rgb:            (R, G, B) filter names; None picks them from the observed redshift (rgb_filters_for)
     norm:           a matplotlib Normalize, or a function of the three channels returning one
     display_arcsec: width shown [arcsec]; None shows the whole saved image
     centre:         "image", "centroid" (meta["centroid_ij_px"]) or (i, j) [px]
@@ -182,7 +190,7 @@ def plot_rgb(images, meta, stage="total_noisy", rgb=None, norm=asinh_norm, displ
     Returns the axes; their coordinates are saved-image pixel indices.
     """
     ax = ax or plt.subplots(figsize=(5, 5))[1]
-    rgb = rgb or rgb_filters_for(meta["redshift"])
+    rgb = rgb or rgb_filters_for(observed_redshift(meta))
     stack, start, size = _display(images, meta, stage, display_arcsec, centre)
     show_image(ax, rgb_array(stack, images["filters"], rgb, norm), start)
     if scale_bar:
@@ -200,7 +208,7 @@ def plot_2x2(images, meta, stage="total_noisy", rgb=None, norm=asinh_norm, displ
     default "Greys" shows bright as black. Other arguments as plot_rgb. Returns the figure.
     """
     fig, axes = plt.subplots(2, 2, figsize=(8, 8), gridspec_kw=dict(wspace=0, hspace=0))
-    rgb = rgb or rgb_filters_for(meta["redshift"])
+    rgb = rgb or rgb_filters_for(observed_redshift(meta))
     plot_rgb(images, meta, stage, rgb, norm, display_arcsec, centre, scale_bar, label, axes[0, 0], fontsize)
     stack, start, _ = _display(images, meta, stage, display_arcsec, centre)
     channels = apply_norm(channel_stack(stack, images["filters"], rgb), norm)
