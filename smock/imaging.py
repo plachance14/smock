@@ -35,7 +35,8 @@ _JADES_MEDIUM_10SIGMA = {"F090W": 28.85, "F115W": 28.98, "F150W": 28.93, "F200W"
 _JADES_MEDIUM_F090W_S = 9200.0
 CEERS_EXPOSURE_S = 2835.0       # per filter and pointing (F115W twice that)
 
-# 5-sigma point-source depths [AB mag] in r = 0.1" apertures, corrected to total flux.
+# 5-sigma point-source depths [AB mag]. How each was measured is in SURVEY_DEPTH_KINDS: the
+# JWST ones in r = 0.1" apertures, corrected to total flux; the DECaLS one from a PSF fit.
 SURVEY_DEPTHS_5SIGMA = {
     # CEERS final survey: Finkelstein et al. 2025 (arXiv:2501.04085), Table 5, measured in
     # d = 0.2" apertures. CEERS has no F090W, so it is derived: the JADES Medium F090W depth
@@ -46,7 +47,22 @@ SURVEY_DEPTHS_5SIGMA = {
               "F115W": 29.2, "F150W": 29.1, "F200W": 29.3, "F277W": 29.5, "F356W": 29.4,
               "F444W": 29.0},
     "JADES-Medium": {f: m10 + FIVE_SIGMA_FROM_TEN for f, m10 in _JADES_MEDIUM_10SIGMA.items()},
+    # DECaLS (DESI Legacy Imaging Surveys, DECam): the survey's design depths for two
+    # exposures in 1.5" seeing (legacysurvey.org/dr10/description). Real depths vary across
+    # the sky: the Legacy Surveys' psfdepth_<band> values give them (psfdepth_to_njy).
+    "DECaLS-like": {"g": 24.7, "r": 23.9, "z": 23.0},
 }
+# "aperture": a point source in an r = SURVEY_APERTURE_RADIUS_ARCSEC aperture, corrected to
+# total flux (sigma_pix_from_depth); "psf_weighted": a PSF fit, as the Legacy Surveys'
+# psfdepth (sigma_pix_from_psf_depth)
+SURVEY_DEPTH_KINDS = {"CEERS": "aperture", "JADES-Medium": "aperture", "DECaLS-like": "psf_weighted"}
+
+DECAM_PIXEL_ARCSEC = 0.262          # Legacy Surveys coadds
+DECALS_DESIGN_SEEING_ARCSEC = 1.5   # the seeing the DECaLS design depths assume (FWHM)
+NANOMAGGY_NJY = 3631.0              # 1 nanomaggy = AB 22.5 = 3.631 microJy
+# Moffat slope for ground-based seeing. Pure atmospheric turbulence gives about 4.765
+# (Trujillo et al. 2001); real seeing PSFs usually have broader wings (lower beta).
+MOFFAT_BETA = 3.5
 SURVEY_APERTURE_RADIUS_ARCSEC = 0.1
 
 
@@ -66,6 +82,22 @@ def gaussian_psf(fwhm_arcsec, pixel_arcsec, size=None):
         size = 2 * int(np.ceil(4.0 * fwhm_arcsec / pixel_arcsec)) + 1
     y, x = np.mgrid[:size, :size] - (size - 1) / 2.0
     psf = np.exp(-(x**2 + y**2) / (2.0 * sigma_pix**2))
+    return psf / psf.sum()
+
+
+def moffat_psf(fwhm_arcsec, pixel_arcsec, beta=MOFFAT_BETA, size=None):
+    """Circular Moffat PSF sampled at pixel centres, normalised to sum 1: a model of
+    ground-based seeing, whose wings are broader than a Gaussian's.
+
+    I(r) is proportional to (1 + (r / alpha)^2)^-beta, with alpha = FWHM / (2 sqrt(2^(1/beta) - 1)).
+    size: odd number of pixels per side (default: covers +-6 FWHM, which holds all but
+    ~0.02% of the light for beta = 3.5). The peak is on the central pixel.
+    """
+    alpha_pix = fwhm_arcsec / pixel_arcsec / (2.0 * np.sqrt(2.0 ** (1.0 / beta) - 1.0))
+    if size is None:
+        size = 2 * int(np.ceil(6.0 * fwhm_arcsec / pixel_arcsec)) + 1
+    y, x = np.mgrid[:size, :size] - (size - 1) / 2.0
+    psf = (1.0 + (x**2 + y**2) / alpha_pix**2) ** -beta
     return psf / psf.sum()
 
 
@@ -97,6 +129,25 @@ def sigma_pix_from_depth(depth_njy, nsigma, aperture_radius_arcsec, pixel_arcsec
     """
     n_pix = np.pi * (aperture_radius_arcsec / pixel_arcsec) ** 2
     return ee * depth_njy / nsigma / np.sqrt(n_pix)
+
+
+def sigma_pix_from_psf_depth(depth_njy, nsigma, psf):
+    """Per-pixel white-noise sigma [nJy] that reproduces a PSF-weighted point-source depth.
+
+    A PSF fit to a point source on white noise measures its flux with
+    sigma_flux = sigma_pix / sqrt(sum P^2), where P is the PSF on the image's pixels,
+    normalised to sum 1. A depth of depth_njy at nsigma means sigma_flux = depth_njy / nsigma,
+    so sigma_pix = sigma_flux * sqrt(sum P^2). This is how the Legacy Surveys define psfdepth.
+    """
+    p = np.asarray(psf, dtype=np.float64)
+    p = p / p.sum()
+    return depth_njy / nsigma * np.sqrt((p**2).sum())
+
+
+def psfdepth_to_njy(psfdepth, nsigma=5.0):
+    """Flux [nJy] of an nsigma point source from a Legacy Surveys psfdepth_<band> value
+    [1/nanomaggy^2]: nsigma / sqrt(psfdepth) nanomaggies."""
+    return nsigma / np.sqrt(psfdepth) * NANOMAGGY_NJY
 
 
 def load_stpsf_psf(psf_dir, filt, kind="DET_SAMP", pixel_arcsec=0.03):

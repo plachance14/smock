@@ -1,11 +1,12 @@
-"""Known-answer tests for smock.imaging: AB fluxes, the Gaussian PSF, encircled energy and
-the depth -> per-pixel noise conversion."""
+"""Known-answer tests for smock.imaging: AB fluxes, the Gaussian and Moffat PSFs, encircled
+energy and the depth -> per-pixel noise conversions."""
 import numpy as np
 import pytest
 
 from smock import config
-from smock.imaging import (NIRCAM_WIDE, SURVEY_DEPTHS_5SIGMA, ab_mag_to_njy, encircled_energy, gaussian_psf,
-                           load_stpsf_psf, scale_depth, sigma_pix_from_depth)
+from smock.imaging import (NIRCAM_WIDE, SURVEY_DEPTH_KINDS, SURVEY_DEPTHS_5SIGMA, ab_mag_to_njy, encircled_energy,
+                           gaussian_psf, load_stpsf_psf, moffat_psf, psfdepth_to_njy, scale_depth,
+                           sigma_pix_from_depth, sigma_pix_from_psf_depth)
 
 
 def test_ab_mag_to_njy():
@@ -64,6 +65,39 @@ def test_survey_presets():
     # ... which is how CEERS's missing F090W is filled: JADES F090W (9.2 ks) at 2835 s
     assert ceers["F090W"] == pytest.approx(28.85 + 0.7526 - 1.25 * np.log10(9200 / 2835), abs=1e-4)
     assert set(ceers) == set(jades)
+    assert set(SURVEY_DEPTH_KINDS) == set(SURVEY_DEPTHS_5SIGMA)
+    assert SURVEY_DEPTH_KINDS["DECaLS-like"] == "psf_weighted"
+
+
+def test_moffat_psf_shape_and_encircled_energy():
+    fwhm, pixel, beta = 1.0, 0.02, 3.5
+    psf = moffat_psf(fwhm, pixel, beta)
+    c = psf.shape[0] // 2
+    assert psf.sum() == pytest.approx(1.0)
+    assert psf[c, c + 25] / psf[c, c] == pytest.approx(0.5, rel=1e-12)    # r = FWHM / 2 = 25 px
+    # exact: EE(R) = 1 - (1 + R^2 / alpha^2)^(1 - beta)
+    alpha = fwhm / (2 * np.sqrt(2 ** (1 / beta) - 1))
+    for r in (0.5, 1.0, 2.0):
+        exact = 1 - (1 + r**2 / alpha**2) ** (1 - beta)
+        assert encircled_energy(psf, pixel, r, subsample=4) == pytest.approx(exact, rel=2e-3)
+
+
+def test_sigma_pix_from_psf_depth():
+    # one-pixel PSF: the fit is that pixel, so sigma_pix = sigma_flux
+    delta = np.zeros((5, 5))
+    delta[2, 2] = 1.0
+    assert sigma_pix_from_psf_depth(50.0, 5, delta) == pytest.approx(10.0)
+    # well-sampled Gaussian: sum P^2 = 1 / (4 pi sigma^2), sigma in pixels
+    psf = gaussian_psf(1.5, 0.262)
+    sigma_px = 1.5 / 0.262 / (2 * np.sqrt(2 * np.log(2)))
+    assert sigma_pix_from_psf_depth(50.0, 5, psf) == pytest.approx(10.0 / (2 * np.sqrt(np.pi) * sigma_px), rel=1e-3)
+
+
+def test_psfdepth_to_njy():
+    # the Legacy Surveys' own conversion: m_5sigma = -2.5 [log10(5 / sqrt(psfdepth)) - 9]
+    psfdepth = 2500.0
+    mag = -2.5 * (np.log10(5 / np.sqrt(psfdepth)) - 9)
+    assert psfdepth_to_njy(psfdepth) == pytest.approx(ab_mag_to_njy(mag), rel=1e-6)
 
 
 
