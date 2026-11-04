@@ -1,7 +1,7 @@
 """Black-hole quantities for the AGN grid: the disc temperature, and a check against the grid.
 
-The AGN grids are built on CLOUDY's `agn` continuum, whose big-bump temperature T is an axis
-of the grid. These functions give each BH its T from the simulation's mass and accretion
+The AGN grids are built on CLOUDY's `agn` continuum, whose blue-bump temperature T
+(`blue_bump_temperature`) is an axis of the grid. These functions give each BH its T from the simulation's mass and accretion
 rate. (Its L_bol, the grid's weight, synthesizer's BlackHoles computes itself from the
 accretion rate: epsilon * Mdot c^2.) They are thin-disc formulae (Shakura & Sunyaev 1973):
 
@@ -98,7 +98,7 @@ def ionising_photons_per_lbol(incident_grid_path, temperature):
     Read from the file itself: synthesizer rescales this grid to per Lsun when it loads it.
     """
     with h5py.File(incident_grid_path, "r") as f:
-        log_t = np.log10(f["axes/big_bump_temperature"][:])
+        log_t = np.log10(f["axes/blue_bump_temperature"][:])
         log_q = f["log10_specific_ionising_luminosity/HI"][:]
     return np.interp(np.log10(_values(temperature, "K")), log_t, log_q)
 

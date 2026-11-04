@@ -93,9 +93,9 @@ def _toy_grid(path):
     """A 3 x 2 grid: T (log_on_read, K) x column (linear), with a limit cycle at (2, 1)."""
     import h5py
     with h5py.File(path, "w") as f:
-        f.attrs["axes"] = ["big_bump_temperature", "column_densities"]
-        f["axes/big_bump_temperature"] = [1e4, 1e5, 1e6]
-        f["axes/big_bump_temperature"].attrs["log_on_read"] = True
+        f.attrs["axes"] = ["blue_bump_temperature", "column_densities"]
+        f["axes/blue_bump_temperature"] = [1e4, 1e5, 1e6]
+        f["axes/blue_bump_temperature"].attrs["log_on_read"] = True
         f["axes/column_densities"] = [23.0, 24.0]
         f["axes/column_densities"].attrs["log_on_read"] = False
         flags = np.zeros((3, 2), dtype=np.int64)
@@ -107,24 +107,24 @@ def _toy_grid(path):
 
 def test_grid_check_flags_and_range(tmp_path):
     path = _toy_grid(tmp_path / "toy.hdf5")
-    report = grid_check(path, big_bump_temperature=np.array([10**5.5, 1e5, 10**3.5, 1e6]),
+    report = grid_check(path, blue_bump_temperature=np.array([10**5.5, 1e5, 10**3.5, 1e6]),
                         column_densities=np.array([23.5, 24.0, 23.0, 25.0]))
     assert report[0] == {"outside": [], "flags": ["limit_cycle"]}     # between T 1e5-1e6, N_H 23-24
     assert report[1] == {"outside": [], "flags": []}                  # exactly on (1e5, 24): one point
-    assert report[2] == {"outside": ["big_bump_temperature"], "flags": []}   # clamped to 1e4; rerun ignored
+    assert report[2] == {"outside": ["blue_bump_temperature"], "flags": []}   # clamped to 1e4; rerun ignored
     assert report[3] == {"outside": ["column_densities"], "flags": ["limit_cycle"]}  # clamped to (1e6, 24)
 
 
 def test_grid_check_needs_every_axis(tmp_path):
     path = _toy_grid(tmp_path / "toy.hdf5")
     with pytest.raises(ValueError):
-        grid_check(path, big_bump_temperature=np.array([1e5]))
+        grid_check(path, blue_bump_temperature=np.array([1e5]))
 
 
 def test_grid_check_takes_bh_attribute_names_and_units(tmp_path):
     # singular names (as BlackHoles attributes are), unyt values converted, scalars broadcast
     path = _toy_grid(tmp_path / "toy.hdf5")
-    report = grid_check(path, big_bump_temperature=unyt_array([1e-2, 10**5.5 / 1e3], "MK") * 1e3,
+    report = grid_check(path, blue_bump_temperature=unyt_array([1e-2, 10**5.5 / 1e3], "MK") * 1e3,
                         column_density=23.5, accretion_rates=np.zeros(2))
     assert [r["flags"] for r in report] == [[], ["limit_cycle"]]
 
@@ -144,7 +144,7 @@ def test_ionising_photons_per_lbol_interpolates_in_log_t(tmp_path):
     import h5py
     path = tmp_path / "incident.hdf5"
     with h5py.File(path, "w") as f:
-        f["axes/big_bump_temperature"] = [1e4, 1e5]
+        f["axes/blue_bump_temperature"] = [1e4, 1e5]
         f["log10_specific_ionising_luminosity/HI"] = [8.0, 9.0]
     assert ionising_photons_per_lbol(path, [1e4, 10**4.5, 1e5]) == pytest.approx([8.0, 8.5, 9.0])
 
