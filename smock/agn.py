@@ -67,6 +67,23 @@ def disc_max_temperature(mass, accretion_rate, r_isco=R_ISCO_RG):
     return _thin_disc_temperature(mass, accretion_rate, T_MAX_RADIUS * r_isco, r_isco)
 
 
+# synthesizer's default blue-bump temperature (from the first release after 1.3.1, synthesizer#1249):
+# the thin-disc temperature at 20 GM/c^2 (10 Schwarzschild radii), disc inner edge at 6 GM/c^2
+SYNTHESIZER_DISC_RADIUS_RG = 20.0
+
+
+def synthesizer_blue_bump_temperature(mass, accretion_rate):
+    """The disc temperature [K] synthesizer gives a black hole by default (smock's default).
+
+    The thin-disc temperature at 20 GM/c^2 (10 Schwarzschild radii) of a disc whose inner edge
+    is at 6 GM/c^2, following Inayoshi & Maiolino (2025). synthesizer calculates this itself
+    from its first release after 1.3.1 (as `blue_bump_temperature`); it is computed here so
+    that smock gives the same value with 1.3.1. About 0.17 dex cooler than T_max.
+    mass [Msun], accretion_rate [Msun/yr]; zero accretion gives 0 K.
+    """
+    return _thin_disc_temperature(mass, accretion_rate, SYNTHESIZER_DISC_RADIUS_RG, R_ISCO_RG)
+
+
 def disc_temperature_at(mass, accretion_rate, radius, unit="r_isco", r_isco=R_ISCO_RG):
     """Thin-disc temperature [K] at a chosen radius (an option).
 

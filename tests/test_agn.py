@@ -148,3 +148,12 @@ def test_ionising_photons_per_lbol_interpolates_in_log_t(tmp_path):
         f["log10_specific_ionising_luminosity/HI"] = [8.0, 9.0]
     assert ionising_photons_per_lbol(path, [1e4, 10**4.5, 1e5]) == pytest.approx([8.0, 8.5, 9.0])
 
+
+def test_synthesizer_blue_bump_temperature_matches_synthesizer():
+    # synthesizer#1249's own test: T ~ Mdot^(1/4) M^(-1/2), 7.4564e4 K at 1e8 Msun and 1 Msun/yr
+    from smock.agn import disc_max_temperature, synthesizer_blue_bump_temperature
+    t = synthesizer_blue_bump_temperature(np.array([1e7, 1e8, 1e9]), np.array([1.0, 1.0, 16.0]))
+    assert t.to("K").value == pytest.approx(7.4564e4 * np.array([10**0.5, 1.0, 10**-0.5 * 2]), rel=1e-4)
+    # 10 R_s against T_max at (49/36) 6 r_g: the same disc, 0.17 dex cooler
+    ratio = (t / disc_max_temperature(np.array([1e7, 1e8, 1e9]), np.array([1.0, 1.0, 16.0]))).value
+    assert np.log10(ratio) == pytest.approx(-0.167, abs=0.002)

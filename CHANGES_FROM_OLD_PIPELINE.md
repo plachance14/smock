@@ -66,6 +66,11 @@ light passes through the gas.
   The old runs had Ca, Na, Al, Ni and several other elements off, so they lacked those
   elements' lines and opacity.
 - The AGN now gets IGM absorption. Its dust still acts only at 2 nm–100 µm, as before.
+- The disc temperature (the CLOUDY `agn` continuum's blue-bump temperature) is now the one
+  synthesizer itself gives a black hole: a thin disc's temperature at 10 Schwarzschild radii
+  (Inayoshi & Maiolino 2025). The old pipeline used the disc's hottest point, at (49/36) of
+  the innermost stable orbit, which is 0.17 dex hotter; `DISC_TEMPERATURE = "T_max"` gives
+  that back.
 - Spectra are interpolated linearly in flux along disc temperature (before: in log flux).
 - The grids' disc temperatures reach 10^6.5 K. The old tables stopped at 10^6 K, and hotter
   discs were held at 10^6 K without a warning. At the cool end the grids start at about
