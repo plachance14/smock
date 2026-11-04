@@ -28,9 +28,9 @@ from matplotlib.ticker import NullFormatter, ScalarFormatter
 
 # R, G, B by redshift, as in ambra_lrd's rgb_image: F444W always red; green and blue move
 # redder above z = 6.5
-RGB_FILTERS_LOW_Z = ("F444W", "F200W", "F115W")
-RGB_FILTERS_HIGH_Z = ("F444W", "F277W", "F150W")
-RGB_SWITCH_Z = 6.5
+RGB_FILTERS_LOW_REDSHIFT = ("F444W", "F200W", "F115W")
+RGB_FILTERS_HIGH_REDSHIFT = ("F444W", "F277W", "F150W")
+RGB_SWITCH_REDSHIFT = 6.5
 
 # text drawn on images (size label, free-text label, filter names) [pt]; always bold
 IMAGE_FONTSIZE = 18
@@ -51,7 +51,7 @@ SPECTRUM_LEGEND = dict(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=Fal
 
 def rgb_filters_for(z):
     """Default (R, G, B) filter names for redshift z (ambra_lrd's choice)."""
-    return RGB_FILTERS_LOW_Z if z <= RGB_SWITCH_Z else RGB_FILTERS_HIGH_Z
+    return RGB_FILTERS_LOW_REDSHIFT if z <= RGB_SWITCH_REDSHIFT else RGB_FILTERS_HIGH_REDSHIFT
 
 
 def asinh_norm(channels, linear_frac=0.03):
