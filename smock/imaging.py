@@ -60,8 +60,11 @@ SURVEY_DEPTH_KINDS = {"CEERS": "aperture", "JADES-Medium": "aperture", "DECaLS-l
 DECAM_PIXEL_ARCSEC = 0.262          # Legacy Surveys coadds
 DECALS_DESIGN_SEEING_ARCSEC = 1.5   # the seeing the DECaLS design depths assume (FWHM)
 NANOMAGGY_NJY = 3631.0              # 1 nanomaggy = AB 22.5 = 3.631 microJy
-# Moffat slope for ground-based seeing. Pure atmospheric turbulence gives about 4.765
-# (Trujillo et al. 2001); real seeing PSFs usually have broader wings (lower beta).
+# Moffat slope for ground-based seeing: 3.5 matched the mean PSF of DES coadds, also taken
+# with DECam (Bruderer et al. 2016, ApJ 817, 25). Pure atmospheric turbulence gives about
+# 4.765 (Trujillo et al. 2001), the narrowest wings; seeing-limited PSFs usually have broader
+# wings (lower beta), with 2.5-4.5 often quoted. At fixed FWHM, 21% of the light lies outside
+# r = FWHM for beta = 3.5 (16% for 4.765, 29% for 2.5).
 MOFFAT_BETA = 3.5
 SURVEY_APERTURE_RADIUS_ARCSEC = 0.1
 
