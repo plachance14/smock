@@ -126,7 +126,7 @@ Open the walkthrough notebook (notebooks/walkthrough.ipynb) in Jupyter or VS Cod
 and step through it cell by cell, reading the notes as you go.
 It mocks up one galaxy from the test data, and each step shows what synthesizer and smock are doing, so it's the best way to begin to understand the code as well as a check that everything works.
 
-It needs up to about 5 GB of memory. On a cluster, run it on a compute node (or wherever your
+It needs up to about 7 GB of memory. On a cluster, run it on a compute node (or wherever your
 cluster allows that much memory usage), e.g. in an interactive job.
 On Vera, either ask SLURM for the memory explicitly (e.g. --mem=16G), or for multiple cores (e.g. -n 4) because the default
 per core is less than 5 GB.

@@ -1,5 +1,5 @@
 """Known-answer tests for smock.imaging: AB fluxes, the Gaussian and Moffat PSFs, encircled
-energy and the depth -> per-pixel noise conversions."""
+energy, the depth -> per-pixel noise conversions, and synthesizer's smoothed data cube."""
 import numpy as np
 import pytest
 
@@ -144,3 +144,51 @@ def test_det_samp_matches_fine_grid_convolution(filt):
         exact = _bin5(fftconvolve(src, over, mode="same"))
         ours = fftconvolve(_bin5(src), det, mode="same")
         assert np.abs(ours - exact).max() <= tol * exact.max()
+
+
+def test_smoothed_data_cube_matches_images_and_adds_up_in_chunks():
+    """The walkthroughs' aperture spectrum (step 12, APERTURE_SPECTRUM = "cube") rests on two
+    things synthesizer's smoothed data cube does: at each wavelength it holds the same light as a
+    smoothed image of the same stars, pixel by pixel, so a sum over the aperture matches the
+    images; and the cubes of separate groups of stars add up to the cube of all of them, so the
+    large-galaxy notebook's chunks give the walkthrough's answer."""
+    import warnings
+
+    from unyt import Hz, angstrom, erg, kpc, s
+    from synthesizer.emissions import Sed
+    from synthesizer.imaging import Image, SpectralCube
+    from synthesizer.kernel_functions import Kernel
+
+    rng = np.random.default_rng(3)
+    n, n_lam = 120, 12
+    lam = np.geomspace(1000, 20000, n_lam) * angstrom
+    lnu = rng.random((n, n_lam)) * 1e28                           # erg/s/Hz
+    xyz = np.c_[rng.normal(0, 0.5, (n, 2)), np.zeros(n)] * kpc
+    sml = rng.uniform(0.05, 0.6, n) * kpc
+    kernel = Kernel("quintic").get_kernel()
+    grid = dict(resolution=0.1 * kpc, fov=4 * kpc)
+
+    def cube_of(sel):
+        cube = SpectralCube(lam=lam, **grid)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=r"\s*Coordinates must be centered")
+            cube.generate_data_cube_smoothed(Sed(lam, lnu=lnu[sel] * erg / s / Hz), coordinates=xyz[sel],
+                                             smoothing_lengths=sml[sel], kernel=kernel, kernel_threshold=1)
+        assert cube.units == erg / s / Hz
+        return cube.arr
+
+    everything = cube_of(slice(None))
+    k = 5
+    image = Image(**grid)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r"\s*Coordinates must be centered")
+        image.generate_img_smoothed(signal=lnu[:, k], coordinates=xyz, smoothing_lengths=sml,
+                                    kernel=kernel, kernel_threshold=1)
+    np.testing.assert_allclose(everything[..., k], image.arr, rtol=1e-12, atol=1e-12 * image.arr.max())
+
+    mask = np.zeros(image.npix, bool)
+    mask[12:25, 18:31] = True                                     # an off-centre, uneven aperture
+    assert everything[mask].sum(axis=0)[k] == pytest.approx(image.arr[mask].sum(), rel=1e-12)
+
+    chunks = cube_of(slice(0, 50)) + cube_of(slice(50, 90)) + cube_of(slice(90, None))
+    np.testing.assert_allclose(chunks, everything, rtol=1e-12, atol=1e-12 * everything.max())
