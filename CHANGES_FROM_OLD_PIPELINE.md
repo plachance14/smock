@@ -16,6 +16,7 @@ Where a default changed and the old choice is still reasonable, it is one settin
 |---|---|---|---|
 | Stellar mass given to synthesizer | birth mass (`Mass + TotalMassReturned`) | current mass, so stars were ~0.15 dex too faint | `STAR_MASS = "current_masses"` |
 | Birth-cloud dust, τ_V at Z = 0.01 | 1 (FLARES) | 3 | `KAPPA_BC = 3` |
+| ISM dust opacity below z = 4 | 10^2.9 (tuned at z = 0) up to z = 2, rising to 10^4.1 at z = 4 | 10^4.1 at every redshift (tuned at z ≈ 4) | `KAPPA_CODE = 10**4.1` |
 | Particle crop (stars, gas and black holes) | square prism, half the image width + 10 px | 1.5″ cylinder, depth ±100 ckpc/h | `CROP_SHAPE = "cylinder"`, `CROP_SIZE = 1.5` (no depth cut, which only matters for distant particles in whole-group mode) |
 | Star smoothing lengths | 60th-neighbour distance | 32nd | `load_galaxy(..., star_smoothing_k=32)` |
 | AGN gas | standard BLR grid (n_H = 10^10 cm⁻³, N_H = 10^23 cm⁻²) | gas-enshrouded (n_H = 10^9.5, N_H = 10^24.5, v_turb = 400 km/s, 0.1 Z☉) | the gas-enshrouded grid and point given next to `AGN_GRID_POINT` |
@@ -25,6 +26,10 @@ Where a default changed and the old choice is still reasonable, it is one settin
 
 The AGN covering fraction is new. Its default, f = 1, gives the old behaviour: all the disc's
 light passes through the gas.
+
+A second dust model is new, `DUST_MODEL = "physical_dtm"`: an opacity per unit dust mass in
+physical units, with each galaxy's dust-to-metal ratio from its metallicity and age (Vijayan et
+al. 2019). One value then works at every redshift; the default keeps the old calibration units.
 
 ## Changes with no switch back
 
