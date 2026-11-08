@@ -36,7 +36,8 @@ How the downloaded data (the test cutout, the PSFs and the AGN grids) were made 
 - `notebooks/walkthrough_large_galaxy.ipynb`: Shares many of the same steps as the walkthrough notebook, but is used on a very large galaxy. This allows us to demonstrate the chunking of star particles to allow the job to fit in memory.
 - `notebooks/make_subhalo_list.ipynb`: Creates a list of subhalo indices with specific properties, to allow for easier access when looking to produce mock observations of specific types of galaxies. The example cuts are on stellar mass and black-hole luminosity, but you should customize this to your own needs.
 - `scripts/run_notebook.py`: runs a notebook from top to bottom without opening it.
-- `tests/`: checks against known answers (`python -m pytest`).
+- `scripts/run_batch.py`: mock observations of many galaxies in one job (e.g. a SLURM array over a subhalo list from `make_subhalo_list.ipynb`), with the large-galaxy notebook's steps and settings; each galaxy gets the notebooks' three files, and each task a catalogue that `scripts/merge_catalogues.py` joins into one table. Its docstring says how to run it.
+- `tests/`: checks against known answers (`python -m pytest`). `tests/test_batch.py` checks that the batch script gives the notebooks' results; it takes 15-30 minutes, so it runs only with `SMOCK_SLOW_TESTS=1`.
 
 ## Questions and problems
 Open an [issue on GitHub](https://github.com/plachance14/smock/issues), or email Patrick LaChance, p.lachance@soton.ac.uk.
