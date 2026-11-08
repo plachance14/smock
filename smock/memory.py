@@ -34,21 +34,65 @@ def rss_gb():
     return _proc_status_gb("VmRSS")
 
 
-def memory_limit_gb(environ=None):
+def memory_limit_gb(environ=None, cgroup=True):
     """Memory this job may use [GB].
 
-    Inside a SLURM job, its allocation: SLURM_MEM_PER_NODE, or SLURM_MEM_PER_CPU times the
-    CPUs on the node (both in MiB). Otherwise the machine's total memory (shared, on a login
-    node: see free_gb). None if neither is known.
+    The smaller of two readings, where they exist:
+      - the SLURM job's allocation: SLURM_MEM_PER_NODE, or SLURM_MEM_PER_CPU times the CPUs on
+        the node (both in MiB);
+      - the limit the system actually enforces on this process (its memory cgroup; see
+        cgroup_limit_gb). This one matters when a step started with `srun --mem` has less
+        memory than its job: SLURM's variables still give the job's.
+    With neither, the machine's total memory (shared, on a login node: see free_gb). None if
+    nothing is known. cgroup=False uses SLURM's variables only.
     """
     env = os.environ if environ is None else environ
     mib = 1024**2 / BYTES_PER_GB
+    limits = []
     if env.get("SLURM_MEM_PER_NODE"):
-        return int(env["SLURM_MEM_PER_NODE"]) * mib
-    if env.get("SLURM_MEM_PER_CPU"):
+        limits.append(int(env["SLURM_MEM_PER_NODE"]) * mib)
+    elif env.get("SLURM_MEM_PER_CPU"):
         cpus = int(env.get("SLURM_CPUS_ON_NODE") or env.get("SLURM_NTASKS") or 1)
-        return int(env["SLURM_MEM_PER_CPU"]) * cpus * mib
-    return _meminfo_gb("MemTotal")
+        limits.append(int(env["SLURM_MEM_PER_CPU"]) * cpus * mib)
+    if cgroup:
+        enforced = cgroup_limit_gb()
+        if enforced is not None:
+            limits.append(enforced)
+    return min(limits) if limits else _meminfo_gb("MemTotal")
+
+
+def cgroup_limit_gb(proc_cgroup="/proc/self/cgroup", root="/sys/fs/cgroup"):
+    """The memory limit the system enforces on this process [GB], or None if there is none.
+
+    Linux puts each process in a "control group", and SLURM sets a memory limit on each job's
+    and step's group; going over it gets the process killed. This reads the limit of this
+    process's group and of every group above it, and returns the smallest. Both kinds of
+    system are read: cgroup v1 (`memory.limit_in_bytes`, as on Vera) and v2 (`memory.max`).
+    "No limit" (v2's "max", or v1's huge default) counts as none.
+    """
+    try:
+        lines = Path(proc_cgroup).read_text().splitlines()
+    except OSError:
+        return None
+    candidates = []
+    for line in lines:
+        _, controllers, path = line.split(":", 2)
+        if "memory" in controllers.split(","):                      # v1: "7:memory:/slurm/..."
+            candidates.append((Path(root) / "memory" / path.lstrip("/"), "memory.limit_in_bytes"))
+        elif controllers == "":                                     # v2: "0::/..."
+            candidates.append((Path(root) / path.lstrip("/"), "memory.max"))
+    limits = []
+    for folder, name in candidates:
+        for d in (folder, *folder.parents):
+            try:
+                text = (d / name).read_text().strip()
+            except OSError:
+                continue
+            if text != "max" and int(text) < 2**60:               # v1 writes "no limit" as ~9.2e18
+                limits.append(int(text) / BYTES_PER_GB)
+            if d == Path(root):
+                break
+    return min(limits) if limits else None
 
 
 def _meminfo_gb(key):
