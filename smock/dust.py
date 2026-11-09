@@ -3,14 +3,14 @@
 **The ISM opacity** (walkthrough steps 3-4, DUST_MODEL). tau_V = kappa x the dust column in
 front of each star, which synthesizer adds up through the gas's SPH kernels. Two models:
 
-- "code_units" (default): kappa per unit *metal* mass (dust-to-metal ratio 1), fixed in
+- "code_units": kappa per unit *metal* mass (dust-to-metal ratio 1), fixed in
   MP-Gadget's comoving units, (ckpc/h)^2 per 1e10 Msun/h, as the old pipeline did.
   `kappa_code_for_redshift` picks the value from the snapshot's redshift: 10^2.9 up to z = 2
   (tuned at z = 0 for arXiv:2605.13843 and used there to z = 1.5), 10^4.1 from z = 4 (the old
   pipeline's, tuned at z ~ 4), with log10 kappa linear in z between. Neither value fits the
   bright end of the UV luminosity function at z = 2-3 well (10^2.9 gives 3-4x too many bright
   galaxies there, 10^4.1 2-3x too few), so the join is only a bridge between the two.
-- "physical_dtm": kappa per unit *dust* mass in physical units (`KAPPA_DUST`, pc^2/Msun), times
+- "physical_dtm" (default): kappa per unit *dust* mass in physical units (`KAPPA_DUST`, pc^2/Msun), times
   each galaxy's dust-to-metal ratio from Vijayan et al. (2019, MNRAS 489, 4072; arXiv:1904.02196),
   `dtm_vijayan19`, which grows with the galaxy's metallicity and age. One value works at every
   redshift: in our check on ASTRID (stars only, light within 10 pkpc, slope -1), 0.27 matched the

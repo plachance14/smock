@@ -108,7 +108,7 @@ GAS_MARGIN_CKPCH = 5.0
 MIN_STARS = 50                  # batch only: skip galaxies with fewer stars in the crop (the old pipeline's 50)
 # 3. stars, gas and black holes
 STAR_MASS = "initial_masses"
-DUST_MODEL = "code_units"
+DUST_MODEL = "physical_dtm"     # or "code_units" (the old pipeline's opacity per unit metal mass)
 EFFICIENCY = 0.1
 DISC_TEMPERATURE = "synthesizer"
 DISC_RADIUS = 3.0
