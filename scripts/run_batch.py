@@ -70,6 +70,17 @@ from smock.data import code_mass_to_msun, crop, kappa_code_to_physical, load_gal
 from smock.dust import WindowedPowerLaw
 from smock.io import ab_mag, image_stack, save_images, save_spectrum
 
+# synthesizer 1.3.1 stops a smoothed data cube (the aperture spectrum) when the stars don't straddle zero on every axis, as a
+# small galaxy offset from its catalogue position, or one chunk of a large galaxy, can; its images only warn.
+# The check is a rough test of centring that the result doesn't depend on, so make it warn everywhere, and hide
+# that warning (until synthesizer changes the check)
+import functools
+import synthesizer.imaging.data_cube_generators as _cube_generators
+import synthesizer.imaging.image_generators as _image_generators
+_warn_only = functools.partial(_image_generators._validate_centered_coordinates, warn_only=True)
+_cube_generators._validate_centered_coordinates = _image_generators._validate_centered_coordinates = _warn_only
+warnings.filterwarnings("ignore", message=r"\s*Coordinates must be centered")
+
 # ======================================================================================
 # Settings: the notebooks' names and defaults (see the notebooks for what each one does)
 # ======================================================================================
