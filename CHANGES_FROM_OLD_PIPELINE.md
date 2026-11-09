@@ -22,7 +22,7 @@ Where a default changed and the old choice is still reasonable, it is one settin
 | AGN gas | standard BLR grid (n_H = 10^10 cm⁻³, N_H = 10^23 cm⁻²) | gas-enshrouded (n_H = 10^9.5, N_H = 10^24.5, v_turb = 400 km/s, 0.1 Z☉) | the gas-enshrouded grid and point given next to `AGN_GRID_POINT` |
 | AGN dust slope | −1, the stars' slope | −2 | `AGN_DUST_SLOPE = -2` |
 | Aperture for spectra and catalogue values | the whole segment | segment pixels within 2 r½ | `APERTURE = "segment_and_r_half"` |
-| Stars in the aperture spectrum | each star's light spread over its smoothing kernel, as in the images (a synthesizer data cube added up over the aperture), so a star near the edge counts in part | the stars whose positions fall inside, each with all its light | `APERTURE_SPECTRUM = "points"` (in the large-galaxy notebook, `"two_pass"`) |
+| Stars in the aperture spectrum | each star's light spread over its smoothing kernel, as in the images (a synthesizer data cube added up over the aperture), so a star near the edge counts in part | the stars whose positions fall inside, each with all its light | `APERTURE_SPECTRUM = "points"` (all three: walkthrough, large-galaxy notebook, batch script) |
 | Compactness apertures | exact pixel overlaps | edges tapered over half a pixel, which biased compactness ~9% low | `COMPACTNESS_METHOD = "taper"` |
 
 The AGN covering fraction is new. Its default, f = 1, gives the old behaviour: all the disc's

@@ -138,7 +138,8 @@ CHUNK_STARS = "auto"
 MEMORY_LIMIT_GB = None
 MEMORY_SAFETY = 0.5
 TRIAL_STARS = 500
-APERTURE_SPECTRUM = "cube"      # or "two_pass", "preset"
+APERTURE_SPECTRUM = "cube"      # or "points" (the walkthrough's rule, in a second pass; "two_pass" also works), "preset"
+APERTURE_SPECTRUM_OPTIONS = ("cube", "points", "two_pass", "preset")
 PRESET_APERTURE_ARCSEC = 0.5
 # 8. noise
 SEED = 1
@@ -573,7 +574,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
         assert star_cubes[STAR_LABELS[0]].shape[:2] == aperture.shape
         part_lnu = {p: (star_cubes[p][aperture].sum(axis=0) * cube_units[p]).to("erg/s/Hz").value for p in STAR_LABELS}
         props["aperture_spectrum"] = "stars spread over their kernels (smoothed data cube)"
-    elif APERTURE_SPECTRUM == "two_pass":
+    elif APERTURE_SPECTRUM in ("points", "two_pass"):
         part_lnu = {p: 0.0 for p in STAR_LABELS}
         chunks = stars_only.split(chunk_stars)
         start = 0
@@ -734,6 +735,8 @@ def main():
     ap.add_argument("--redo", action="store_true", help="make galaxies again even if their files exist")
     args = ap.parse_args()
     global CHUNK_STARS
+    if APERTURE_SPECTRUM not in APERTURE_SPECTRUM_OPTIONS:
+        raise ValueError(f"APERTURE_SPECTRUM = {APERTURE_SPECTRUM!r}: use one of {APERTURE_SPECTRUM_OPTIONS}")
     if args.chunk_stars is not None:
         CHUNK_STARS = None if args.chunk_stars.lower() == "none" else (
             "auto" if args.chunk_stars == "auto" else int(args.chunk_stars))
