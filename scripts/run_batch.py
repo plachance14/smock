@@ -121,14 +121,14 @@ COVERING_MODE = "random"
 COVERING_SEED = "bh_id_and_snapshot"
 # 4. line-of-sight dust (KAPPA_CODE depends on the snapshot: see kappa_for)
 KAPPA_CODE_LOW, KAPPA_CODE_HIGH, KAPPA_CODE_JOIN = 10**2.9, 10**4.1, (2.0, 4.0)
-KAPPA_DUST = 0.36
+KAPPA_DUST = 0.3                # ~0.39 with DUST_SLOPE_ISM = -0.7
 KAPPA_BC = 1.0
 Z_BC = 0.01
 SPH_KERNEL = "quintic"
 # 5. the emission model
 YOUNG_AGE = 10 * Myr
 DUST_SLOPE_BC = -1.0
-DUST_SLOPE_ISM = -1.0           # or -0.7 (Charlot & Fall 2000; see the notebooks' step 5)
+DUST_SLOPE_ISM = -1.0           # or -0.7 (Charlot & Fall 2000) with KAPPA_DUST = 0.39; see the notebooks' step 5
 AGN_DUST_SLOPE = DUST_SLOPE_ISM
 AGN_DUST_WINDOW = (20 * angstrom, 1e6 * angstrom)
 DUST_TEMPERATURE = 100 * K

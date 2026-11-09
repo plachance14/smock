@@ -13,10 +13,12 @@ front of each star, which synthesizer adds up through the gas's SPH kernels. Two
 - "physical_dtm": kappa per unit *dust* mass in physical units (`KAPPA_DUST`, pc^2/Msun), times
   each galaxy's dust-to-metal ratio from Vijayan et al. (2019, MNRAS 489, 4072; arXiv:1904.02196),
   `dtm_vijayan19`, which grows with the galaxy's metallicity and age. One value works at every
-  redshift: in our check on ASTRID it matched the UV luminosity functions at z = 2-8 to within a
-  factor of 2, and the rest-optical ones at z = 0.5-1.5. Old metal-rich galaxies saturate at
-  DTM = 0.329, where kappa_eff = 0.36 x 0.329 = 0.117 pc^2/Msun of metals, the value 10^2.9 has
-  at z = 0.
+  redshift: in our check on ASTRID (stars only, light within 10 pkpc, slope -1), 0.27 matched the
+  observed UV luminosity functions at z = 2.5-4 and stays close at z = 2-8, where the dust
+  matters; the rest-optical ones at z = 0.5-1.5 come out within the spread of the surveys. The
+  default, 0.3, sits between that and 0.36, which reproduces 10^2.9 at z = 0 (old metal-rich
+  galaxies saturate at DTM = 0.329, and 0.36 x 0.329 = 0.117 pc^2/Msun of metals). With a
+  shallower dust curve (slope -0.7, Charlot & Fall 2000) the same UV needs about 0.39.
 
 **A power-law dust curve that acts only inside a wavelength window.**
 
@@ -67,7 +69,7 @@ class WindowedPowerLaw(PowerLaw):
 KAPPA_CODE_LOW_Z = 10**2.9      # (ckpc/h)^2 / (1e10 Msun/h) of metals; tuned at z = 0 (arXiv:2605.13843)
 KAPPA_CODE_HIGH_Z = 10**4.1     # the same units; the old pipeline's, tuned at z ~ 4
 KAPPA_CODE_JOIN = (2.0, 4.0)    # low-z value up to the first redshift, high-z value from the second
-KAPPA_DUST = 0.36               # pc^2 / Msun of dust, for "physical_dtm" (provisional: UV LFs at z = 2-8)
+KAPPA_DUST = 0.3                # pc^2 / Msun of dust, for "physical_dtm" (UV LFs at z = 2-4; ~0.39 with slope -0.7)
 
 # Vijayan et al. (2019) Eq. 15 and their canonical grain-growth timescale (Section 2)
 VIJAYAN19 = dict(D0=0.008, D1=0.329, alpha=0.017, beta=-1.337, gamma=2.122, tau_acc0_yr=5e4)

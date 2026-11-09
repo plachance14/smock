@@ -30,7 +30,8 @@ light passes through the gas.
 
 A second dust model is new, `DUST_MODEL = "physical_dtm"`: an opacity per unit dust mass in
 physical units, with each galaxy's dust-to-metal ratio from its metallicity and age (Vijayan et
-al. 2019). One value then works at every redshift; the default keeps the old calibration units.
+al. 2019). One value then works at every redshift (`KAPPA_DUST = 0.3`, tuned on ASTRID's UV
+luminosity functions at z = 2–4); the default keeps the old calibration units.
 
 ## Changes with no switch back
 
