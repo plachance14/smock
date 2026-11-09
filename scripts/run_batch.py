@@ -117,7 +117,7 @@ SPH_KERNEL = "quintic"
 # 5. the emission model
 YOUNG_AGE = 10 * Myr
 DUST_SLOPE_BC = -1.0
-DUST_SLOPE_ISM = -1.0
+DUST_SLOPE_ISM = -1.0           # or -0.7 (Charlot & Fall 2000; see the notebooks' step 5)
 AGN_DUST_SLOPE = DUST_SLOPE_ISM
 AGN_DUST_WINDOW = (20 * angstrom, 1e6 * angstrom)
 DUST_TEMPERATURE = 100 * K
