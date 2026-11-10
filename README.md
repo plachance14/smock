@@ -39,6 +39,26 @@ How the downloaded data (the test cutout, the PSFs and the AGN grids) were made 
 - `scripts/run_batch.py`: mock observations of many galaxies in one job (e.g. a SLURM array over a subhalo list from `make_subhalo_list.ipynb`), with the large-galaxy notebook's steps and settings; each galaxy gets the notebooks' three files, and each task a catalogue that `scripts/merge_catalogues.py` joins into one table. Its docstring says how to run it.
 - `tests/`: checks against known answers (`python -m pytest`). `tests/test_batch.py` checks that the batch script gives the notebooks' results; it takes 15-30 minutes, so it runs only with `SMOCK_SLOW_TESTS=1`.
 
+## How to cite
+You don't need to cite smock itself. If you publish something made with it, please cite
+Synthesizer, which does the modelling:
+- Lovell et al. 2025, OJAp, 8, [doi:10.33232/001c.145766](https://doi.org/10.33232/001c.145766)
+- Roper et al. 2026, JOSS, 11, 9436, [doi:10.21105/joss.09436](https://doi.org/10.21105/joss.09436)
+- Vijayan et al. 2026, [arXiv:2607.27467](https://arxiv.org/abs/2607.27467) (Synthesizer's grids)
+
+Beyond that, it depends on which parts you use. For reference:
+- the pipeline as a whole: LaChance et al. 2026, [arXiv:2609.26999](https://arxiv.org/abs/2609.26999)
+  (LRDs in AMBRA), and LaChance et al. 2025, OJAp, 8,
+  [doi:10.33232/001c.129991](https://doi.org/10.33232/001c.129991) (galaxy morphologies in ASTRID)
+- BPASS, the stellar population models: Stanway & Eldridge 2018, MNRAS, 479, 75
+- CLOUDY, which made the AGN grids: Gunasekera et al. 2025, [arXiv:2508.01102](https://arxiv.org/abs/2508.01102)
+- ASTRID: Bird et al. 2022, MNRAS, 512, 3703; Ni et al. 2022, MNRAS, 513, 670
+- AMBRA: Zhou et al. 2026, [arXiv:2604.01123](https://arxiv.org/abs/2604.01123)
+- the default dust-to-metal ratio: Vijayan et al. 2019, MNRAS, 489, 4072
+- statmorph, for the morphology: Rodriguez-Gomez et al. 2019, MNRAS, 483, 4140
+- the old dust normalisation (`DUST_MODEL = "code_units"`): Bird et al. 2022 at high redshift,
+  Hafezianzadeh et al. 2026, [arXiv:2605.13843](https://arxiv.org/abs/2605.13843) at low redshift
+
 ## Questions and problems
 Open an [issue on GitHub](https://github.com/plachance14/smock/issues), or email Patrick LaChance, p.lachance@soton.ac.uk.
 
