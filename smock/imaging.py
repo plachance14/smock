@@ -164,3 +164,53 @@ def load_stpsf_psf(psf_dir, filt, kind="DET_SAMP", pixel_arcsec=0.03):
     from astropy.io import fits     # imported here so importing smock stays light
     with fits.open(Path(psf_dir) / f"NIRCam_{filt}_{pixel_arcsec}arcsec.fits") as hdul:
         return hdul[kind].data.astype(np.float64), hdul[0].header
+
+
+# ---- a PSF like the stars in a drizzled mosaic --------------------------------------------
+# STPSF's DET_SAMP is the telescope's PSF on the 0.03" grid. In a real mosaic a point source is
+# broader: each exposure integrates the light over NIRCam's own pixels (0.031" short-wavelength,
+# 0.063" long-wavelength), charge spreads a little between neighbouring pixels, and drizzling
+# spreads each detector pixel over a smaller square ("drop", pixfrac x the detector pixel).
+# Averaged over many dithers, that is the telescope's PSF convolved with those squares and the
+# charge-spreading Gaussian. A point source then has f(<0.2")/f(<0.1") = 1.48 in F444W instead of
+# 1.29, as the public DJA mosaic PSF models do (1.50 at their 0.04").
+NIRCAM_DETECTOR_PIXEL_ARCSEC = {"SW": 0.031, "LW": 0.063}
+# STPSF 2.2.0's charge diffusion (constants.py: Gaussian sigma per channel, which it calls
+# provisional). STPSF also adds interpixel capacitance, which is left out here (it raises the
+# F444W ratio by another ~0.01).
+NIRCAM_CHARGE_DIFFUSION_ARCSEC = {"SW": 0.0062, "LW": 0.018}
+
+
+def nircam_channel(filt):
+    """"SW" (F070W-F212N) or "LW" (F250M and redder) for a NIRCam filter name such as "F444W"."""
+    return "SW" if int(filt[1:4]) < 250 else "LW"
+
+
+def mosaic_psf(oversamp, fine_pixel_arcsec, oversample, filt, pixfrac=1.0):
+    """A drizzled-mosaic-like PSF on the output grid, from STPSF's oversampled PSF.
+
+    oversamp:          STPSF's OVERSAMP product (load_stpsf_psf(..., kind="OVERSAMP")): an odd-sized
+                       array, oversample times finer than the output grid, summing to 1
+    fine_pixel_arcsec: its pixel [arcsec] (output pixel / oversample: 0.006" for our 0.03" files)
+    oversample:        the file header's SMOCKOVR (5 for our files)
+    filt:              NIRCam filter name, e.g. "F444W" (sets the detector pixel and charge diffusion)
+    pixfrac:           the drizzle drop as a fraction of the detector pixel (1.0 full, 0.75 common)
+    The PSF is convolved, in Fourier space, with the charge-diffusion Gaussian, the detector pixel
+    and the drop (both squares), then summed over each output pixel. Returns an odd-sized array on
+    the output grid, centred on its middle pixel and summing to 1. With PSF_SOURCE = "stpsf_mosaic",
+    the r = 0.1" encircled energy for the depth conversion comes from encircled_energy(), because
+    the file's EE_R0P1 is for the telescope's PSF.
+    """
+    n = oversamp.shape[0]
+    if n % 2 == 0 or n % oversample or (n // oversample) % 2 == 0:
+        raise ValueError(f"OVERSAMP must be odd-sized and {oversample} x an odd number of output pixels; got {n}")
+    channel = nircam_channel(filt)
+    det, sigma = NIRCAM_DETECTOR_PIXEL_ARCSEC[channel], NIRCAM_CHARGE_DIFFUSION_ARCSEC[channel]
+    k = np.fft.fftfreq(n, d=fine_pixel_arcsec)        # spatial frequency [1/arcsec]
+    kernel_1d = (np.sinc(k * det) * np.sinc(k * pixfrac * det)       # the two squares
+                 * np.exp(-2.0 * (np.pi * k * sigma) ** 2))          # the Gaussian
+    ft = np.fft.fft2(np.fft.ifftshift(oversamp)) * (kernel_1d[:, None] * kernel_1d[None, :])
+    img = np.fft.fftshift(np.real(np.fft.ifft2(ft)))
+    m = n // oversample
+    out = img.reshape(m, oversample, m, oversample).sum(axis=(1, 3))      # over each output pixel
+    return out / out.sum()

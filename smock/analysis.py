@@ -193,9 +193,11 @@ def compactness(image, mask, centres, pixel_arcsec, radii_arcsec=COMPACTNESS_RAD
                 method="exact"):
     """f(r < outer) / f(r < inner) of image within mask, minimised over centres.
 
-    image is the noiseless PSF-convolved one (as published), mask the source's
-    segment, centres a list of (i, j) [px]. Returns (minimum, the centre giving it,
-    the ratio at every centre).
+    image: the noiseless PSF-convolved one (as published), or the noisy one, as observers measure.
+    mask:  the pixels that count; everything else is set to zero. As published, the source's
+           segment; observers instead keep the sky and set only other sources' pixels to zero
+           (observer_mask). centres: a list of (i, j) [px], e.g. compactness_centres(...) or just
+           [centroid]. Returns (minimum, the centre giving it, the ratio at every centre).
     """
     masked = np.where(mask, image, 0.0)
     inner, outer = (r / pixel_arcsec for r in radii_arcsec)
@@ -203,6 +205,116 @@ def compactness(image, mask, centres, pixel_arcsec, radii_arcsec=COMPACTNESS_RAD
                        for c in centres])
     k = int(np.argmin(ratios))
     return float(ratios[k]), centres[k], ratios
+
+
+def observer_mask(segm_data, label):
+    """The pixels an observer's aperture keeps: everything except other sources' segments.
+
+    Setting only the source's own segment (as published) drops the faint light outside it, which
+    lowers the compactness of faint sources (a point source at S/N ~ 14 reads ~1.06 instead of 1.29).
+    """
+    return ~((segm_data > 0) & (segm_data != label))
+
+
+def aperture_snr(image, centre, radius_px, sigma_pix):
+    """S/N of the flux in a circle of radius_px [px] about centre (i, j), for white noise of sigma_pix
+    per pixel (same units as image): flux / (sigma_pix sqrt(pi r^2))."""
+    return aperture_flux(image, centre, radius_px) / (sigma_pix * np.sqrt(np.pi * radius_px**2))
+
+
+def matched_circle_fluxes(raw_images, psf, centre, radius_px, noise=None):
+    """Fluxes in a circle on PSF-matched images, as photometric catalogues measure colours.
+
+    raw_images: {band: 2D unconvolved image} on one pixel grid; psf: the broadest band's PSF (F444W's),
+    centred, odd-sized; centre (i, j) [px], e.g. the F444W centroid; radius_px [px] (0.18" / pixel for
+    Kokorev et al. 2024's 0.36" diameter); noise: None, or {band: 2D noise image} added after the
+    convolution. Every band is convolved with the same PSF, so the circle sees the same part of the
+    galaxy in each. Returns {band: flux in the circle} (image units). For a total flux, divide by
+    point_source_fraction(psf, radius_px), as the catalogues do for compact sources.
+    """
+    out = {}
+    for band, img in raw_images.items():
+        matched = fftconvolve(img, psf / psf.sum(), mode="same")
+        if noise is not None:
+            matched = matched + noise[band]
+        out[band] = aperture_flux(matched, centre, radius_px)
+    return out
+
+
+def point_source_fraction(psf, radius_px):
+    """Share of a point source's light inside a circle of radius_px [px] about the PSF's middle."""
+    mid = np.array([(psf.shape[0] - 1) / 2.0, (psf.shape[1] - 1) / 2.0])
+    return aperture_flux(psf / psf.sum(), mid, radius_px)
+
+
+# ---- the shape of the spectrum -------------------------------------------------------------
+# Continuum slopes beta (f_lambda ~ lambda^beta, so a flat f_nu is beta = -2) on the rest-frame
+# spectrum, with the lines masked. The spectroscopic LRD papers (Hviding et al. 2025, de Graaff et al.
+# 2025) split the UV and optical slopes at the Balmer limit, 3645 A, and fit 1200-3645 and 3645-7000 A.
+# split_aa moves the split, e.g. to 3000 A so that the optical slope spans the Balmer break.
+
+# rest wavelengths [A] masked by +-LINE_MASK_AA: the papers' optical lines plus the strong UV ones
+CONTINUUM_LINES_AA = (1216, 1240, 1302, 1335, 1397, 1549, 1640, 1663, 1750, 1909, 2326, 2424, 2470, 2798,
+                      3346, 3426, 3727, 3869, 3889, 3970, 4026, 4069, 4102, 4340, 4363, 4471, 4686, 4861,
+                      4959, 5007, 5199, 5755, 5876, 6300, 6364, 6548, 6563, 6584, 6678, 6717, 6731, 7065,
+                      7136, 7325, 7751)
+LINE_MASK_AA = 50.0
+C_AA_PER_S = 2.99792458e18
+
+
+def continuum_slope(lam_aa, lnu, lo_aa, hi_aa, lines_aa=CONTINUUM_LINES_AA, mask_aa=LINE_MASK_AA):
+    """beta of f_lambda ~ lambda^beta between lo_aa and hi_aa [rest A], from L_nu (any units).
+
+    A straight-line fit of log f_lambda against log lambda with +-mask_aa about each line removed,
+    then points more than 3 sigma above the fit (lines not in the list) dropped and the fit repeated
+    (up to three times). NaN with fewer than 5 points.
+    """
+    lam = np.asarray(lam_aa, float)
+    flam = np.asarray(lnu, float) * C_AA_PER_S / lam**2
+    keep = (lam >= lo_aa) & (lam <= hi_aa) & (flam > 0)
+    for l0 in lines_aa:
+        keep &= np.abs(lam - l0) > mask_aa
+    if keep.sum() < 5:
+        return np.nan
+    x, y = np.log10(lam[keep]), np.log10(flam[keep])
+    for _ in range(3):
+        fit = np.polyfit(x, y, 1)
+        resid = y - np.polyval(fit, x)
+        ok = resid < 3 * np.std(resid) + 1e-12
+        if ok.all():
+            break
+        x, y = x[ok], y[ok]
+    return float(np.polyfit(x, y, 1)[0])
+
+
+def spectral_shape(lam_aa, lnu, split_aa=3645.0, uv_from_aa=1200.0, opt_to_aa=7000.0, agn_lnu=None):
+    """Continuum shape of a rest-frame spectrum (lam_aa [A], lnu any L_nu units).
+
+    Returns a dict: beta_uv (uv_from_aa to split_aa), beta_opt (split_aa to opt_to_aa), the Balmer break
+    as the mean f_nu in 4000-4100 A over that in 3620-3720 A (de Graaff et al. 2025's windows), and,
+    when agn_lnu (the AGN's own L_nu) is given, the AGN's share of L_nu at 1500, 3000 and 5000 A.
+    """
+    lam, lnu = np.asarray(lam_aa, float), np.asarray(lnu, float)
+    red, blue = (lam >= 4000) & (lam <= 4100), (lam >= 3620) & (lam <= 3720)
+    out = {"beta_uv": continuum_slope(lam, lnu, uv_from_aa, split_aa),
+           "beta_opt": continuum_slope(lam, lnu, split_aa, opt_to_aa),
+           "balmer_break": float(lnu[red].mean() / lnu[blue].mean()) if red.any() and blue.any() else np.nan,
+           "split_aa": float(split_aa)}
+    if agn_lnu is not None:
+        for l0 in (1500, 3000, 5000):
+            k = int(np.argmin(np.abs(lam - l0)))
+            out[f"agn_share_{l0}"] = float(agn_lnu[k] / lnu[k]) if lnu[k] > 0 else np.nan
+    return out
+
+
+def v_shaped(beta_uv, beta_opt, max_beta_uv=-0.2, min_beta_opt=0.0, min_difference=0.5):
+    """The V-shaped continuum of Hviding et al. 2025 and de Graaff et al. 2025 (without their
+    statistical margins): beta_uv < max_beta_uv, beta_opt > min_beta_opt and beta_opt - beta_uv >
+    min_difference. Kocevski et al. 2024's photometric version is max_beta_uv = -0.37,
+    min_difference = 0 (and beta_uv > -2.8)."""
+    with np.errstate(invalid="ignore"):
+        return (np.asarray(beta_uv) < max_beta_uv) & (np.asarray(beta_opt) > min_beta_opt) & \
+               (np.asarray(beta_opt) - np.asarray(beta_uv) > min_difference)
 
 
 # ---- is it a little red dot? ---------------------------------------------------------------
@@ -235,7 +347,7 @@ def lrd_selection_ambra(mags, compactness):
                 lenient=lenient, strict=bright & (strict_red1 | strict_red2) & compact, lrd=lenient)
 
 
-def lrd_selection_kokorev24(mags, compactness):
+def lrd_selection_kokorev24(mags, compactness, snr=None, min_snr=14.0):
     """Kokorev et al. 2024 (arXiv:2401.09981, sec. 3.1), adapted from Labbe et al. 2023:
 
         red1: F115W - F150W < 0.8 and F200W - F277W > 0.7 and F200W - F356W > 1.0
@@ -243,10 +355,11 @@ def lrd_selection_kokorev24(mags, compactness):
         compact: f(r < 0.2") / f(r < 0.1") in F444W < 1.7
         not a brown dwarf: F115W - F200W > -0.5
         F444W < 27.7
+        detected: S/N > min_snr (14) in F444W, when snr is given (measured on the noisy image, e.g.
+                  aperture_snr in a 0.32" diameter circle, as UNCOVER's)
 
-    Their other cuts need a real observation (> 14 sigma in F444W, a PSF-dominated profile,
-    photometric redshifts) and are left out. Returns a dict of booleans: red1, red2, compact,
-    not_brown_dwarf, lrd.
+    Their other cuts (a PSF-dominated profile, photometric redshifts) are left out. Returns a dict
+    of booleans: red1, red2, compact, not_brown_dwarf, detected, lrd.
     """
     m = {band: np.asarray(value, dtype=float) for band, value in mags.items()}
     c = np.asarray(compactness, dtype=float)
@@ -256,8 +369,9 @@ def lrd_selection_kokorev24(mags, compactness):
         compact = c < 1.7
         not_brown_dwarf = m["F115W"] - m["F200W"] > -0.5
         bright = m["F444W"] < 27.7
-    return dict(red1=red1, red2=red2, compact=compact, not_brown_dwarf=not_brown_dwarf,
-                lrd=(red1 | red2) & compact & not_brown_dwarf & bright)
+        detected = np.ones_like(bright) if snr is None else np.asarray(snr, dtype=float) > min_snr
+    return dict(red1=red1, red2=red2, compact=compact, not_brown_dwarf=not_brown_dwarf, detected=detected,
+                lrd=(red1 | red2) & compact & not_brown_dwarf & bright & detected)
 
 
 def lrd_source_quality(segmentation_ok, bh_mass, stellar_mass, subfind_stellar_mass, offset_ckpch,

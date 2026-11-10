@@ -51,7 +51,11 @@ of the rest failed the compactness cut. Switched to smock's default one at a tim
 
 The AGN dust slope, the disc temperature and the aperture spectrum hardly changed the selection. To
 compare with the old pipeline's LRD results, switch those three back (table above). I'm still looking
-into which settings are right for comparing with observed LRDs.
+into which settings are right for comparing with observed LRDs. Observers measure compactness a little
+differently: on the noisy image, at the source's centroid, keeping the faint light around the source, and
+in mosaics whose stars look slightly broader than our PSF. smock can do the same (`COMPACTNESS_IMAGE =
+"noisy"`, `COMPACTNESS_MASK = "others"`, `COMPACTNESS_CENTRES = "centroid"`, `PSF_SOURCE = "stpsf_mosaic"`),
+and step 15 can measure colours as photometric catalogues do (`LRD_PHOTOMETRY = "matched_circle"`).
 
 ## Changes with no switch back
 

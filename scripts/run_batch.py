@@ -136,8 +136,9 @@ DUST_BETA = 2.0
 # 6. the instrument
 IGM = Inoue14
 FILTER_CODES = [f"JWST/NIRCam.{f}" for f in imaging.NIRCAM_WIDE]
-PSF_SOURCE = "stpsf"
+PSF_SOURCE = "stpsf"            # or "stpsf_mosaic" (as stars look in a drizzled mosaic), "gaussian", "moffat"
 PSF_PRODUCT = "DET_SAMP"
+DRIZZLE_PIXFRAC = 1.0           # for "stpsf_mosaic"
 MOFFAT_FWHM = imaging.DECALS_DESIGN_SEEING_ARCSEC
 MOFFAT_BETA = imaging.MOFFAT_BETA
 NOISE_PRESET = "JADES-Medium"
@@ -171,11 +172,18 @@ APERTURE_R_HALF = 2.0
 SFR_AGE = 100 * Myr
 COMPACTNESS_RADII = (0.1, 0.2)
 COMPACTNESS_METHOD = "exact"
+COMPACTNESS_IMAGE = "psf"       # or "noisy"; the observers' way: "noisy", "others", "centroid"
+COMPACTNESS_MASK = "segment"    # or "others" (sky kept, other sources set to zero)
+COMPACTNESS_CENTRES = "four"    # or "centroid"
 IMAGE_PHOTOMETRY = ()
 # 15. LRD selection (into the catalogue)
 LRD_SELECTION = "ambra"         # or "kokorev24", or None
 LRD_MAX_OFFSET_CKPCH = 10.0
-LRD_PHOTOMETRY = "particles"
+LRD_PHOTOMETRY = "particles"    # or "psf", "noisy" (IMAGE_PHOTOMETRY), "matched_circle", "matched_circle_noisy"
+LRD_CIRCLE_ARCSEC = 0.36
+LRD_SNR_ARCSEC = 0.32
+SPECTRAL_SHAPES = False
+SLOPE_SPLIT_AA = 3645.0
 # batch only
 QUICK_LOOK = False              # one PNG per galaxy: the image beside the spectrum
 
@@ -254,6 +262,10 @@ class Job:
             f = fc.split(".")[-1]
             if PSF_SOURCE == "stpsf":
                 self.psfs[fc], header = imaging.load_stpsf_psf(config.PSF_DIR, f, PSF_PRODUCT)
+            elif PSF_SOURCE == "stpsf_mosaic":
+                over, header = imaging.load_stpsf_psf(config.PSF_DIR, f, "OVERSAMP")
+                self.psfs[fc] = imaging.mosaic_psf(over, header["SMOCKPIX"] / header["SMOCKOVR"], header["SMOCKOVR"], f,
+                                                   DRIZZLE_PIXFRAC)
             elif PSF_SOURCE == "gaussian":
                 self.psfs[fc] = imaging.gaussian_psf(imaging.NIRCAM_FWHM_ARCSEC[f], PIXEL)
             else:
@@ -621,8 +633,11 @@ def observe(job, snap, snap_number, sidx, out_dir):
     if bh_in.any():
         k = np.argmax(np.where(bh_in, bh.accretion_rates.value, -np.inf))
         bright_bh = analysis.pixel_indices(bh_xy[k:k + 1], source.shape, pixel_kpc)[0]
-    centres = analysis.compactness_centres(centroid, bright_bh)
-    props["compactness"], best_centre, _ = analysis.compactness(psf[DETECT_FILTER].arr, source, centres, PIXEL,
+    centres = (analysis.compactness_centres(centroid, bright_bh) if COMPACTNESS_CENTRES == "four"
+               else [np.asarray(centroid, float)])
+    keep = analysis.observer_mask(segm.data, label) if COMPACTNESS_MASK == "others" and segmentation_ok else source
+    c_image = {"psf": psf, "noisy": noisy}[COMPACTNESS_IMAGE][DETECT_FILTER].arr
+    props["compactness"], best_centre, _ = analysis.compactness(c_image, keep, centres, PIXEL,
                                                                 COMPACTNESS_RADII, COMPACTNESS_METHOD)
 
     # ---- step 13: save the aperture spectrum and the images ----
@@ -631,6 +646,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
         "detect_connectivity": DETECT_CONNECTIVITY, "deblend_nlevels": DEBLEND_NLEVELS,
         "deblend_contrast": DEBLEND_CONTRAST, "aperture_r_half": APERTURE_R_HALF, "sfr_young_age_Myr": SFR_AGE.to("Myr").value,
         "compactness_radii_arcsec": COMPACTNESS_RADII, "compactness_method": COMPACTNESS_METHOD,
+        "compactness_image": COMPACTNESS_IMAGE, "compactness_mask": COMPACTNESS_MASK, "compactness_centres": COMPACTNESS_CENTRES,
         "detect_smooth": DETECT_SMOOTH, "image_photometry": list(IMAGE_PHOTOMETRY),
     }
     source_values = {
@@ -646,6 +662,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
         "pixel_arcsec": PIXEL, "fov_arcsec": FOV, "units": "nJy per pixel",
         "image_centre": IMAGE_CENTRE, "buffer_pix": BUFFER_PIX,
         "axes": "filter, x, y", "psf_source": PSF_SOURCE, "psf_product": PSF_PRODUCT, "noise_preset": NOISE_PRESET,
+        **({"drizzle_pixfrac": DRIZZLE_PIXFRAC} if PSF_SOURCE == "stpsf_mosaic" else {}),
         "kernel_margin_pix": KERNEL_MARGIN_PIX,
         "sigma_pix_nJy": {fc.split(".")[-1]: (job.depths[fc] / 5).to("nJy").value for fc in FILTER_CODES},
     }
@@ -678,15 +695,34 @@ def observe(job, snap, snap_number, sidx, out_dir):
            **{f"total_{f}_mag": float(ab_mag(v)) for f, v in total.items()},
            **{f"aperture_{f}_mag": float(ab_mag(v)) for f, v in in_source.items()}}
     if LRD_SELECTION is not None:
-        fluxes = ({fc: aperture_phot["total"][fc].to("nJy").value for fc in FILTER_CODES} if LRD_PHOTOMETRY == "particles"
-                  else image_phot[LRD_PHOTOMETRY])
+        if LRD_PHOTOMETRY == "particles":
+            fluxes = {fc: aperture_phot["total"][fc].to("nJy").value for fc in FILTER_CODES}
+        elif LRD_PHOTOMETRY in ("psf", "noisy"):
+            fluxes = image_phot[LRD_PHOTOMETRY]
+        else:   # as photometric catalogues: PSF-matched to F444W, summed in a circle at the centroid
+            r_px = LRD_CIRCLE_ARCSEC / 2 / PIXEL
+            noise = ({fc: noisy[fc].arr - psf[fc].arr for fc in FILTER_CODES} if LRD_PHOTOMETRY == "matched_circle_noisy"
+                     else None)
+            fluxes = analysis.matched_circle_fluxes({fc: raw[fc].arr for fc in FILTER_CODES}, job.psfs[DETECT_FILTER],
+                                                    centroid, r_px, noise)
+            fluxes[DETECT_FILTER] /= analysis.point_source_fraction(job.psfs[DETECT_FILTER], r_px)
         mags = {fc.split(".")[-1]: float(ab_mag(f)) for fc, f in fluxes.items()}
         select = {"ambra": analysis.lrd_selection_ambra, "kokorev24": analysis.lrd_selection_kokorev24}[LRD_SELECTION]
-        colours = select(mags, props["compactness"])
+        snr = analysis.aperture_snr(noisy[DETECT_FILTER].arr, centroid, LRD_SNR_ARCSEC / 2 / PIXEL,
+                                    (job.depths[DETECT_FILTER] / 5).to("nJy").value)
+        colours = select(mags, props["compactness"], **({"snr": snr} if LRD_SELECTION == "kokorev24" else {}))
         checks = analysis.lrd_source_quality(segmentation_ok, props["M_bh"], props["stellar_mass_aperture"], g["m_star_subfind"],
                                              offset_px * pixel_kpc * (1 + snap.redshift) * snap.h, max_offset_ckpch=LRD_MAX_OFFSET_CKPCH)
+        row["F444W_snr"] = float(snr)
         row |= {"lrd_colours": bool(colours["lrd"]), "lrd_checks_ok": bool(checks["ok"]),
                 "lrd": bool(colours["lrd"] and checks["ok"])}
+    if SPECTRAL_SHAPES:     # the aperture spectrum's continuum shape (rest frame, f_lambda ~ lambda^beta)
+        agn_lnu = aperture_seds["AGN_total"].lnu.to("erg/s/Hz").value if "AGN_total" in aperture_seds else None
+        shape = analysis.spectral_shape(aperture_seds["total"].lam.to("angstrom").value,
+                                        aperture_seds["total"].lnu.to("erg/s/Hz").value, split_aa=SLOPE_SPLIT_AA,
+                                        agn_lnu=agn_lnu)
+        shape["v_shaped"] = bool(analysis.v_shaped(shape["beta_uv"], shape["beta_opt"]))
+        row |= {f"spec_{k}": v for k, v in shape.items()}
     known = [p for p in peaks if p is not None]
     row |= {"seconds": round(time.time() - t_start, 1), "peak_memory_gb": round(max(known), 2) if known else np.nan,
             "files": stem}
