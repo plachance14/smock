@@ -56,8 +56,9 @@ into which settings are right for comparing with observed LRDs.
 ## Changes with no switch back
 
 **Stars and dust**
-- All quantities are converted to physical units before reaching synthesizer. The dust
-  opacity κ is still entered in the old calibration units and converted, so τ is unchanged.
+- All quantities are converted to physical units before reaching synthesizer. With
+  `DUST_MODEL = "code_units"` the dust opacity κ is still entered in the old calibration units
+  and converted, so τ is unchanged; the default model's opacity is in physical units already.
 - The emission model is synthesizer's `LOSStellarEmission`. Stars older than 10 Myr now
   get nebular emission too, which adds 0.004–0.02 dex in NIRCam at z = 6.
 - Absorbed starlight is re-emitted as an energy-balanced greybody (100 K, β = 2), and so is
@@ -107,7 +108,8 @@ into which settings are right for comparing with observed LRDs.
 **Images**
 - The PSFs are STPSF (formerly WebbPSF) models on the 0.03″ grid. The old pipeline used
   Gaussians.
-- Noise is white, matched to survey depths (JADES-Medium-like by default, or CEERS-like).
+- Noise is white, matched to survey depths (JADES-Medium-like by default, or CEERS-like, or
+  DECaLS-like for DECam).
   The old pipeline drew Poisson noise for 10 ks exposures; there is no Poisson option yet.
 - Images use synthesizer's orientation; the old images were transposed relative to it.
 - In the RGB figures, the brightest value of the colour stretch comes from the three filters

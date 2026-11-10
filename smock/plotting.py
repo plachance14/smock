@@ -26,7 +26,7 @@ import numpy as np
 from matplotlib.colors import AsinhNorm, Normalize
 from matplotlib.ticker import NullFormatter, ScalarFormatter
 
-# R, G, B by redshift, as in ambra_lrd's rgb_image: F444W always red; green and blue move
+# R, G, B by redshift, as in the old pipeline's RGB images: F444W always red; green and blue move
 # redder above z = 6.5
 RGB_FILTERS_LOW_REDSHIFT = ("F444W", "F200W", "F115W")
 RGB_FILTERS_HIGH_REDSHIFT = ("F444W", "F277W", "F150W")
@@ -50,12 +50,12 @@ SPECTRUM_LEGEND = dict(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=Fal
 
 
 def rgb_filters_for(z):
-    """Default (R, G, B) filter names for redshift z (ambra_lrd's choice)."""
+    """Default (R, G, B) filter names for redshift z (the old pipeline's choice)."""
     return RGB_FILTERS_LOW_REDSHIFT if z <= RGB_SWITCH_REDSHIFT else RGB_FILTERS_HIGH_REDSHIFT
 
 
 def asinh_norm(channels, linear_frac=0.03):
-    """ambra_lrd's default stretch: asinh with vmin = 0, vmax = the brightest pixel of the
+    """The old pipeline's default stretch: asinh with vmin = 0, vmax = the brightest pixel of the
     displayed channels, and a linear width of linear_frac * vmax (the image's units)."""
     vmax = float(np.max(channels))
     return AsinhNorm(linear_width=linear_frac * vmax, vmin=0.0, vmax=vmax, clip=True)
@@ -268,7 +268,7 @@ def plot_spectrum(spectrum, meta, components=None, filters=None, lam_range_um=(0
 
 def plot_image_and_spectrum(images, image_meta, spectrum, spectrum_meta, rgb_kwargs=None,
                             spectrum_kwargs=None):
-    """The RGB panel beside the spectrum (ambra_lrd's layout, widths 0.35 : 0.65).
+    """The RGB panel beside the spectrum (the old pipeline's layout, widths 0.35 : 0.65).
 
     rgb_kwargs and spectrum_kwargs go to plot_rgb and plot_spectrum. Returns the figure.
     """

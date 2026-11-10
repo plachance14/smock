@@ -1,5 +1,5 @@
-"""Small helpers for the imaging step: a Gaussian PSF fallback, encircled energy, and
-survey depths -> per-pixel noise.
+"""Small helpers for the imaging step: reading the STPSF PSFs, Gaussian and Moffat PSFs,
+encircled energy, and survey depths -> per-pixel noise (NIRCam and DECam).
 
 The synthesizer instrument itself (filters, PSFs, noise) is built in the notebook; these
 only prepare the numbers it takes. Fluxes are in nJy and angles in arcsec throughout.

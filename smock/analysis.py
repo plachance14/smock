@@ -208,7 +208,8 @@ def compactness(image, mask, centres, pixel_arcsec, radii_arcsec=COMPACTNESS_RAD
 # ---- is it a little red dot? ---------------------------------------------------------------
 # Selections on the source's AB magnitudes (a dict, band -> magnitude, e.g. {"F444W": 26.1, ...};
 # NaN where the flux is not positive, which fails every cut) and its compactness. They work on
-# numbers or on arrays (one entry per galaxy). Nothing in the walkthrough applies them by default.
+# numbers or on arrays (one entry per galaxy). The walkthrough's optional step 15 applies one
+# (LRD_SELECTION, "ambra" by default) and only reports the answer; nothing else depends on it.
 
 def lrd_selection_ambra(mags, compactness):
     """The selection of LaChance et al. 2026 (arXiv:2609.26999; LRDs in AMBRA), adapted from UNCOVER's.

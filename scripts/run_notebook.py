@@ -5,8 +5,8 @@ still runs after changing it. The outputs stay in your copy: git strips them at 
     python scripts/run_notebook.py notebooks/walkthrough.ipynb [kernel_name]
 
 Uses jupyter_client, which comes with ipykernel, so nbconvert/nbclient are not needed. The
-kernel defaults to sharable_mock_obs. It stops at the first failing cell (the outputs so far are
-still written).
+kernel defaults to smock_env, the environment SETUP.txt makes (give another name as the second
+argument). It stops at the first failing cell (the outputs so far are still written).
 """
 import json
 import shutil
@@ -18,7 +18,7 @@ from pathlib import Path
 from jupyter_client import KernelManager
 
 nb_path = Path(sys.argv[1]).resolve()
-kernel = sys.argv[2] if len(sys.argv) > 2 else "sharable_mock_obs"
+kernel = sys.argv[2] if len(sys.argv) > 2 else "smock_env"
 nb = json.loads(nb_path.read_text())
 
 # Local IPC sockets rather than unencrypted TCP on a shared login node. Unix socket paths

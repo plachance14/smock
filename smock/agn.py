@@ -7,8 +7,9 @@ accretion rate: epsilon * Mdot c^2.) They are thin-disc formulae (Shakura & Suny
 
     T(r)^4 = 3 G M Mdot / (8 pi sigma r^3) * (1 - sqrt(r_in / r)),   r_in = r_isco
 
-which peaks at r = (49/36) r_isco. That peak, T_max, is the default, as in the
-author's old pipeline. The old code's Stefan-Boltzmann constant had a typo (5.680e-8);
+which peaks at r = (49/36) r_isco. That peak, T_max, is what the old pipeline used; smock's
+default is synthesizer's own value, the temperature at 10 Schwarzschild radii
+(`synthesizer_blue_bump_temperature`), which is 0.17 dex cooler. The old code's Stefan-Boltzmann constant had a typo (5.680e-8);
 the exact value is used here.
 
 r_isco is in units of r_g = GM/c^2 and defaults to 6 (a non-spinning BH). That is not
@@ -60,7 +61,7 @@ def _thin_disc_temperature(mass, accretion_rate, r_rg, r_isco_rg):
 
 
 def disc_max_temperature(mass, accretion_rate, r_isco=R_ISCO_RG):
-    """The disc's peak temperature T_max [K], at (49/36) r_isco (the default).
+    """The disc's peak temperature T_max [K], at (49/36) r_isco (the old pipeline's choice).
 
     mass [Msun], accretion_rate [Msun/yr], r_isco in GM/c^2. Zero accretion gives 0 K.
     """

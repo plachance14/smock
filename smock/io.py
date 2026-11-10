@@ -31,7 +31,7 @@ The images file holds:
     images, meta = load_images(path)       # images: {"filters": ..., stage: ..., "segmap": ...}
 
 Column names carry their units. Values are read from synthesizer with .to(...), never
-in-place conversions (CLAUDE.md).
+in-place conversions.
 """
 import datetime
 import json

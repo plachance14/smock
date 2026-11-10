@@ -4,7 +4,7 @@ Three kinds of data are kept apart:
 
 - simulation input: the PIG snapshots (listed per machine in ``EXTERNAL``) and the public
   test cutout (``TEST_DATA_DIR``, in the repo, git-ignored, downloaded separately);
-- synthesizer data: SPS and AGN grids, our 0.03" NIRCam PSFs and noise templates, in
+- synthesizer data: SPS and AGN grids, our 0.03" NIRCam PSFs (and, later, noise templates), in
   synthesizer's own data folder (``SYNTHESIZER_DIR``: set it with the environment variable
   of the same name, which synthesizer reads too): grids in grids/, PSFs and noise in
   instrument_cache/. synthesizer also keeps its copies of the filter curves there
