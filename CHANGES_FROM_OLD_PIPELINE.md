@@ -35,6 +35,24 @@ old pipeline's 10^4.1, and massive galaxies at z ≈ 5 about twice as much. In a
 pipeline's AMBRA LRDs (with its other settings), about 3%, 13% and 23% of those still selected
 with 10^4.1 drop out at z = 5, 6 and 7.
 
+**If you select little red dots (LRDs),** three other changes in the table matter far more than the
+dust model: birth masses, the weaker birth-cloud dust (1 instead of 3) and the exact compactness
+apertures. The first two add starlight around the AGN, and the third removes the old ~9% low bias
+in compactness. Sources therefore come out less compact, a little bluer and brighter. In a test on
+the old pipeline's AMBRA LRDs at z = 5–7 (all with the gas-enshrouded AGN), smock with the old
+pipeline's settings found 74–97% of them again. With smock's defaults it found only 3–8%, and most
+of the rest failed the compactness cut. Switched to smock's default one at a time:
+
+| Setting | Share of the old LRDs still found |
+|---|---|
+| Birth-cloud dust | 21–51% |
+| Birth masses | 50–90% |
+| Exact compactness apertures | 28–69% |
+
+The AGN dust slope, the disc temperature and the aperture spectrum hardly changed the selection. To
+compare with the old pipeline's LRD results, switch those three back (table above). I'm still looking
+into which settings are right for comparing with observed LRDs.
+
 ## Changes with no switch back
 
 **Stars and dust**
