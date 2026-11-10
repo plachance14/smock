@@ -51,9 +51,10 @@ def test_matches_the_old_formula_with_the_exact_sigma():
 
 def test_radius_units_agree():
     m, mdot = 1e8, 1.0
-    t = [disc_temperature_at(m, mdot, 2.0, "r_isco").value,
-         disc_temperature_at(m, mdot, 12.0, "r_g").value,
-         disc_temperature_at(m, mdot, 6.0, "R_s").value]
+    # float(): pytest >= 9.2 refuses lists holding 0-d arrays, which a single value's .value is
+    t = [float(disc_temperature_at(m, mdot, 2.0, "r_isco").value),
+         float(disc_temperature_at(m, mdot, 12.0, "r_g").value),
+         float(disc_temperature_at(m, mdot, 6.0, "R_s").value)]
     assert t == pytest.approx([t[0]] * 3, rel=1e-12)
     assert disc_temperature_at(m, mdot, 49 / 36).value == pytest.approx(disc_max_temperature(m, mdot).value,
                                                                          rel=1e-12)
@@ -67,7 +68,7 @@ def test_r_isco_option_moves_the_disc_inwards():
 
 
 def test_scalings_and_zero_accretion():
-    t0 = disc_max_temperature(1e6, 0.01).value
+    t0 = float(disc_max_temperature(1e6, 0.01).value)     # a plain number (see test_radius_units_agree)
     assert disc_max_temperature(4e6, 0.01).value == pytest.approx(t0 / 2, rel=1e-12)      # M^-1/2
     assert disc_max_temperature(1e6, 0.16).value == pytest.approx(t0 * 2, rel=1e-12)      # Mdot^1/4
     assert disc_max_temperature(np.array([1e6, 1e6]), np.array([0.0, 0.01])).value == \
