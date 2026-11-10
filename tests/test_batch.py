@@ -3,6 +3,10 @@ because it takes 15-30 minutes and needs the test cutout, the grids and the PSFs
 
     SMOCK_SLOW_TESTS=1 python -m pytest tests/test_batch.py -v
 
+Run it from smock_env, the environment SETUP.txt makes: the notebooks run on its kernel
+(scripts/run_notebook.py's default), so the batch script must use the same packages. From another
+environment, small version differences (e.g. in statmorph's Sersic fit) break the exact comparison.
+
 It runs, with the same settings, scripts/run_batch.py, the large-galaxy notebook and the
 walkthrough (each from a copy with SIDX and the chunk size set, via scripts/run_notebook.py), and
 compares every array the three save. The batch script follows the large-galaxy notebook step by
