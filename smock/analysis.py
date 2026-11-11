@@ -292,20 +292,221 @@ def spectral_shape(lam_aa, lnu, split_aa=3645.0, uv_from_aa=1200.0, opt_to_aa=70
     """Continuum shape of a rest-frame spectrum (lam_aa [A], lnu any L_nu units).
 
     Returns a dict: beta_uv (uv_from_aa to split_aa), beta_opt (split_aa to opt_to_aa), the Balmer break
-    as the mean f_nu in 4000-4100 A over that in 3620-3720 A (de Graaff et al. 2025's windows), and,
-    when agn_lnu (the AGN's own L_nu) is given, the AGN's share of L_nu at 1500, 3000 and 5000 A.
+    as the mean f_nu in 4000-4100 A over that in 3620-3720 A (de Graaff et al. 2025's windows), the turnover
+    wavelength and the slopes either side of it (turnover_wavelength), and, when agn_lnu (the AGN's own L_nu)
+    is given, the AGN's share of L_nu at 1500, 3000 and 5000 A.
     """
     lam, lnu = np.asarray(lam_aa, float), np.asarray(lnu, float)
     red, blue = (lam >= 4000) & (lam <= 4100), (lam >= 3620) & (lam <= 3720)
     out = {"beta_uv": continuum_slope(lam, lnu, uv_from_aa, split_aa),
            "beta_opt": continuum_slope(lam, lnu, split_aa, opt_to_aa),
            "balmer_break": float(lnu[red].mean() / lnu[blue].mean()) if red.any() and blue.any() else np.nan,
-           "split_aa": float(split_aa)}
+           "split_aa": float(split_aa), **turnover_wavelength(lam, lnu)}
     if agn_lnu is not None:
         for l0 in (1500, 3000, 5000):
             k = int(np.argmin(np.abs(lam - l0)))
             out[f"agn_share_{l0}"] = float(agn_lnu[k] / lnu[k]) if lnu[k] > 0 else np.nan
     return out
+
+
+def turnover_wavelength(lam_aa, lnu, lo_aa=1500.0, hi_aa=6000.0, break_aa=(2500.0, 5000.0), step_aa=10.0,
+                        lines_aa=CONTINUUM_LINES_AA, mask_aa=LINE_MASK_AA):
+    """Where the UV and optical slopes meet: a broken power law in f_nu fitted between lo_aa and hi_aa [rest A],
+    the break free between break_aa (Setton et al. 2024, sec. 3.2: 0.15-0.6 um, break between 0.25 and 0.5 um).
+
+    lam_aa [A], lnu (any L_nu units); lines masked as in continuum_slope. The two power laws meet at the break;
+    each trial break is a straight-line fit of log f_nu against log lambda on each side, and the break with the
+    smallest squared residual wins. Returns a dict: turnover_aa, and the slopes alpha_uv and alpha_opt of
+    f_nu ~ lambda^alpha (beta = alpha - 2). NaN with fewer than 5 points on a side.
+    """
+    lam, lnu = np.asarray(lam_aa, float), np.asarray(lnu, float)
+    keep = (lam >= lo_aa) & (lam <= hi_aa) & (lnu > 0)
+    for l0 in lines_aa:
+        keep &= np.abs(lam - l0) > mask_aa
+    x, y = np.log10(lam[keep]), np.log10(lnu[keep])
+    best = (np.inf, np.nan, np.nan, np.nan)
+    for lb in np.arange(break_aa[0], break_aa[1] + step_aa / 2, step_aa):
+        xb = np.log10(lb)
+        blue, red = x < xb, x >= xb
+        if blue.sum() < 5 or red.sum() < 5:
+            continue
+        # one intercept at the break, two slopes: y = a + s1 min(x - xb, 0) + s2 max(x - xb, 0)
+        design = np.column_stack([np.ones_like(x), np.minimum(x - xb, 0), np.maximum(x - xb, 0)])
+        coef, *_ = np.linalg.lstsq(design, y, rcond=None)
+        resid = float(np.sum((y - design @ coef) ** 2))
+        if resid < best[0]:
+            best = (resid, lb, coef[1], coef[2])
+    return {"turnover_aa": float(best[1]), "alpha_uv": float(best[2]), "alpha_opt": float(best[3])}
+
+
+# ---- emission lines --------------------------------------------------------------------------
+# Measured on the rest-frame spectrum, before any broadening, as the excess over a straight-line continuum.
+# The grids are sampled every ~1000 km/s, so a narrow line sits in one bin and its neighbours ([N II] next to
+# H-alpha, for example) blend with it, much as at NIRSpec PRISM's resolution.
+
+LINES_AA = {"Halpha": 6562.80, "Hbeta": 4861.32, "OIII_5007": 5006.84, "OI_8446": 8446.4,
+            "Pabeta": 12818.1, "Paalpha": 18751.0}
+C_KMS = 2.99792458e5
+
+
+def line_luminosity(lam_aa, lnu_erg_s_hz, line_aa, half_width_kms=1500.0, side_kms=(3000.0, 6000.0)):
+    """Luminosity [erg/s] of the line at line_aa [rest A] in a rest-frame spectrum (lam_aa [A], L_nu [erg/s/Hz]).
+
+    The excess of L_lambda over a straight line fitted to the continuum between side_kms on both sides, summed
+    over the bins whose centres lie within half_width_kms of the line, each bin weighted by its width. NaN if
+    a side has fewer than 2 bins.
+    """
+    lam = np.asarray(lam_aa, float)
+    llam = np.asarray(lnu_erg_s_hz, float) * C_AA_PER_S / lam**2            # erg/s/A
+    dv = (lam - line_aa) / line_aa * C_KMS
+    edges = np.concatenate([[lam[0]], 0.5 * (lam[1:] + lam[:-1]), [lam[-1]]])
+    width = np.diff(edges)                                                  # A
+    side = (np.abs(dv) >= side_kms[0]) & (np.abs(dv) <= side_kms[1])
+    if (side & (dv < 0)).sum() < 2 or (side & (dv > 0)).sum() < 2:
+        return np.nan
+    fit = np.polyfit(lam[side], llam[side], 1)
+    inside = np.abs(dv) <= half_width_kms
+    return float(np.sum((llam[inside] - np.polyval(fit, lam[inside])) * width[inside]))
+
+
+def continuum_luminosity_5100(lam_aa, lnu_erg_s_hz, lo_aa=5050.0, hi_aa=5150.0):
+    """lambda L_lambda [erg/s] at 5100 A rest: the median L_lambda between lo_aa and hi_aa (no strong lines
+    there) times 5100 A."""
+    lam = np.asarray(lam_aa, float)
+    llam = np.asarray(lnu_erg_s_hz, float) * C_AA_PER_S / lam**2
+    k = (lam >= lo_aa) & (lam <= hi_aa)
+    return float(5100.0 * np.median(llam[k])) if k.any() else np.nan
+
+
+def line_checks(lam_aa, lnu_erg_s_hz):
+    """The line measurements observers compare LRDs on, from a rest-frame spectrum (lam_aa [A], L_nu [erg/s/Hz]).
+
+    Returns a dict: L_<line> [erg/s] for LINES_AA (NaN outside the spectrum); L_5100 [erg/s]; EW_Halpha [A]
+    (rest); Halpha_Hbeta (the Balmer decrement; LRDs: mean and median ~8.7, de Graaff et al. 2025 sec. 4.2);
+    and the ratios to de Graaff et al. 2025's LRD relations, Halpha_vs_dG25 = L_Halpha / [10^43.24 (L_5100 /
+    10^44)^0.91] (their Eq. 2, scatter 0.23 dex) and OI_vs_dG25 = L_OI_8446 / [10^41.13 (L_Halpha / 10^43)^1.27]
+    (Eq. 6), so 1 is on the relation.
+    """
+    out = {f"L_{name}": line_luminosity(lam_aa, lnu_erg_s_hz, l0) for name, l0 in LINES_AA.items()}
+    l5100 = continuum_luminosity_5100(lam_aa, lnu_erg_s_hz)
+    ha, hb, oi = out["L_Halpha"], out["L_Hbeta"], out["L_OI_8446"]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out |= {"L_5100": l5100,
+                "EW_Halpha": float(ha / (l5100 / 5100.0)) if l5100 > 0 else np.nan,   # rough: continuum at 5100 A
+                "Halpha_Hbeta": float(ha / hb) if hb > 0 else np.nan,
+                "Halpha_vs_dG25": float(ha / (10**43.24 * (l5100 / 1e44) ** 0.91)) if l5100 > 0 else np.nan,
+                "OI_vs_dG25": float(oi / (10**41.13 * (ha / 1e43) ** 1.27)) if ha > 0 else np.nan}
+    return out
+
+
+def virial_fwhm_kms(m_bh_msun, l_halpha_erg_s, epsilon=1.075):
+    """The broad H-alpha FWHM [km/s] that observers' virial mass estimate would give for this black hole: Reines &
+    Volonteri 2015 Eq. 1 (Reines et al. 2013 Eq. 5, with Bentz et al. 2013's radius-luminosity relation) solved
+    for the width, log M_BH = log epsilon + 6.57 + 0.47 log(L_Halpha / 10^42 erg/s) + 2.06 log(FWHM / 10^3 km/s),
+    epsilon = 1.075. m_bh_msun [Msun], l_halpha_erg_s [erg/s] (works on arrays). NaN where L <= 0."""
+    m, lha = np.asarray(m_bh_msun, float), np.asarray(l_halpha_erg_s, float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_fwhm = (np.log10(m) - np.log10(epsilon) - 6.57 - 0.47 * np.log10(lha / 1e42)) / 2.06 + 3.0
+        return np.where((lha > 0) & (m > 0), 10**log_fwhm, np.nan)
+
+
+# ---- a NIRSpec PRISM-like spectrum -----------------------------------------------------------
+FWHM_PER_SIGMA = 2.0 * np.sqrt(2.0 * np.log(2.0))
+
+
+def degrade_resolution(lam_um, flam, r_of_lam, samples_per_fwhm=10):
+    """Blur a spectrum to a resolving power R(lambda) = lambda / FWHM that changes with wavelength.
+
+    lam_um [um, increasing], flam: flux density per unit wavelength (any units); r_of_lam: function of lam_um.
+    The spectrum is moved to the coordinate u = integral of R / lambda d lambda, in which every resolution
+    element has the same width (1), convolved there with a Gaussian of FWHM 1, and moved back; the total
+    flux is kept. Returns flam on lam_um.
+    """
+    from scipy.ndimage import gaussian_filter1d
+    from spectres import spectres
+    lam, flam = np.asarray(lam_um, float), np.asarray(flam, float)
+    du_dlam = r_of_lam(lam) / lam
+    u = np.concatenate([[0.0], np.cumsum(0.5 * (du_dlam[1:] + du_dlam[:-1]) * np.diff(lam))])
+    u_grid = np.arange(u[0], u[-1], 1.0 / samples_per_fwhm)[1:-1]
+    f_u = spectres(u_grid, u, flam / du_dlam, fill=0.0, verbose=False)      # flux per unit u, summed into bins
+    f_u = gaussian_filter1d(f_u, sigma=samples_per_fwhm / FWHM_PER_SIGMA, mode="nearest")
+    return np.interp(u, u_grid, f_u) * du_dlam
+
+
+def prism_spectrum(obs_lam_aa, fnu, dispersion_file, point_source_factor=1.0, lam_range_um=(0.6, 5.3)):
+    """The observed spectrum as NIRSpec's PRISM would record it: blurred to its resolving power and summed into its
+    detector pixels. No noise, slit losses or throughput.
+
+    obs_lam_aa [observed A], fnu (any f_nu units, e.g. nJy); dispersion_file: STScI's jwst_nirspec_prism_disp.fits
+    (JDox, "NIRSpec dispersers and filters": WAVELENGTH [um], DLDS [um per pixel], R), whose R is for a slit
+    filled with light; point_source_factor multiplies it (a compact source gives a sharper spectrum).
+    Returns (lam_um at the pixel centres, fnu in the pixels, in the input units).
+    """
+    from astropy.io import fits
+    from spectres import spectres
+    with fits.open(dispersion_file) as h:
+        d = h[1].data
+        w, dlds, r = (np.asarray(d[k], float) for k in ("WAVELENGTH", "DLDS", "R"))
+    r_of = lambda lam: point_source_factor * np.interp(lam, w, r)
+    lam = np.asarray(obs_lam_aa, float) / 1e4
+    keep = (lam > lam_range_um[0] * 0.8) & (lam < lam_range_um[1] * 1.2)
+    lam, f = lam[keep], np.asarray(fnu, float)[keep]
+    flam = f / lam**2                                                         # per unit wavelength (relative)
+    blurred = degrade_resolution(lam, flam, r_of)
+    pixels = [lam_range_um[0]]
+    while pixels[-1] < lam_range_um[1]:
+        pixels.append(pixels[-1] + float(np.interp(pixels[-1], w, dlds)))
+    pixels = np.array(pixels)
+    binned = spectres(pixels, lam, blurred, fill=np.nan, verbose=False)
+    return pixels, binned * pixels**2
+
+
+# ---- a NIRSpec microshutter spectrum -----------------------------------------------------------
+# A shutter passes the part of the telescope's image that falls on its open area (0.20" x 0.46"); observers then
+# correct the spectrum for the light a centred point source loses. The shutter table (smock.config.NIRSPEC_DIR,
+# msa_shutter_throughput.npz) gives, at each of a few wavelengths, the share of a point source at each offset from
+# the shutter's centre that passes it. Dividing by the centred share gives each position's weight: a point source
+# at the centre keeps all its light, extended light is cut as in the data.
+
+def shutter_weight_maps(table, dx_arcsec, dy_arcsec):
+    """Weights at the given offsets from the shutter's centre (arrays [arcsec], dx across the shutter, dy along its
+    length), one map per table wavelength: share / centred share, 0 beyond the table's +-1". table: the loaded npz
+    (lam_um, offset_arcsec, share[lam, dy, dx]). Returns an array (n_table_lam, *dx.shape)."""
+    from scipy.interpolate import RegularGridInterpolator
+    off, share = np.asarray(table["offset_arcsec"], float), np.asarray(table["share"], float)
+    centre = len(off) // 2
+    pts = np.stack([np.asarray(dy_arcsec, float).ravel(), np.asarray(dx_arcsec, float).ravel()], axis=-1)
+    maps = [RegularGridInterpolator((off, off), s / s[centre, centre], bounds_error=False, fill_value=0.0)(pts)
+            for s in share]
+    return np.array(maps).reshape(len(share), *np.shape(dx_arcsec))
+
+
+def table_wavelength_coefficients(table_lam_um, obs_lam_um):
+    """Linear-interpolation coefficients (n_table_lam, n_lam) that turn values at the table's wavelengths into
+    values at obs_lam_um [observed um]; the end values hold beyond the table."""
+    tl, lam = np.asarray(table_lam_um, float), np.clip(np.asarray(obs_lam_um, float), table_lam_um[0], table_lam_um[-1])
+    coef = np.zeros((len(tl), len(lam)))
+    k = np.clip(np.searchsorted(tl, lam) - 1, 0, len(tl) - 2)
+    t = (lam - tl[k]) / (tl[k + 1] - tl[k])
+    coef[k, np.arange(len(lam))] = 1 - t
+    coef[k + 1, np.arange(len(lam))] += t
+    return coef
+
+
+def shutter_offsets(shape, centre_ij, pixel_arcsec, pa_deg=0.0):
+    """Offsets (dx, dy) [arcsec] of every pixel of an image of this shape from the shutter's centre (i, j) [px]. At
+    pa_deg = 0 the shutter's length runs along the image's first axis (i); pa_deg turns it anticlockwise."""
+    i, j = np.indices(shape, dtype=float)
+    di, dj = (i - centre_ij[0]) * pixel_arcsec, (j - centre_ij[1]) * pixel_arcsec
+    c, s = np.cos(np.radians(pa_deg)), np.sin(np.radians(pa_deg))
+    return dj * c + di * s, -dj * s + di * c
+
+
+def shutter_spectrum(cube_lnu, weight_maps, coefficients):
+    """Sum of a data cube (ny, nx, n_lam) seen through the shutter: each table wavelength's weight map applied to every
+    wavelength, then interpolated in wavelength with coefficients (table_wavelength_coefficients). Returns (n_lam,)."""
+    per_table = np.tensordot(weight_maps, cube_lnu, axes=([1, 2], [0, 1]))       # (n_table_lam, n_lam)
+    return np.sum(per_table * coefficients, axis=0)
 
 
 def v_shaped(beta_uv, beta_opt, max_beta_uv=-0.2, min_beta_opt=0.0, min_difference=0.5):

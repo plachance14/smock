@@ -176,6 +176,7 @@ COMPACTNESS_IMAGE = "psf"       # or "noisy"; the observers' way: "noisy", "othe
 COMPACTNESS_MASK = "segment"    # or "others" (sky kept, other sources set to zero)
 COMPACTNESS_CENTRES = "four"    # or "centroid"
 IMAGE_PHOTOMETRY = ()
+AGN_LINE_WIDTH = None           # broad AGN lines: None, "virial" (from each BH's mass and H-alpha), or a FWHM [km/s]
 # 15. LRD selection (into the catalogue)
 LRD_SELECTION = "ambra"         # or "kokorev24", "rinaldi25", "rinaldi26" (needs RUN_STATMORPH), or None
 LRD_MAX_OFFSET_CKPCH = 10.0
@@ -184,6 +185,10 @@ LRD_CIRCLE_ARCSEC = 0.36
 LRD_SNR_ARCSEC = 0.32
 SPECTRAL_SHAPES = False
 SLOPE_SPLIT_AA = 3645.0
+LINE_CHECKS = False             # line luminosities and ratios into the catalogue (line_*, line_agn_*)
+PRISM_SPECTRUM = False          # a PRISM-like spectrum per galaxy (<stem>_prism.npz)
+PRISM_DISPERSION_FILE = config.NIRSPEC_DIR / "jwst_nirspec_prism_disp.fits"
+PRISM_POINT_SOURCE_FACTOR = 1.0
 # batch only
 QUICK_LOOK = False              # one PNG per galaxy: the image beside the spectrum
 
@@ -620,6 +625,26 @@ def observe(job, snap, snap_number, sidx, out_dir):
     del star_cubes
     for p in BH_LABELS:
         part_lnu[p] = bh_in.astype(float) @ galaxy.black_holes.particle_spectra[p].lnu.to("erg/s/Hz").value
+    # broad AGN lines (AGN_LINE_WIDTH): each black hole in the aperture gets its own line width, applied with
+    # synthesizer's Doppler broadening; step 15's line measurements use the spectra before this (lines_lnu)
+    lines_lnu = dict(part_lnu)
+    props["agn_line_fwhm_kms"] = []
+    if AGN_LINE_WIDTH is not None and agn_on and bh_in.any():
+        def bh_sed(p):
+            """The aperture black holes' spectra p, one per black hole."""
+            return Sed(grid.lam, lnu=galaxy.black_holes.particle_spectra[p].lnu[bh_in])
+        if AGN_LINE_WIDTH == "virial":     # the width observers' mass estimate gives for each BH's mass and H-alpha
+            l_ha = [analysis.line_luminosity(grid.lam.to("angstrom").value, lnu, analysis.LINES_AA["Halpha"])
+                    for lnu in bh_sed("AGN_reprocessed").lnu.to("erg/s/Hz").value]          # before dust
+            fwhm = analysis.virial_fwhm_kms(galaxy.black_holes.masses[bh_in].to("Msun").value, l_ha)
+        else:
+            fwhm = np.full(int(bh_in.sum()), float(AGN_LINE_WIDTH))
+        ok = np.isfinite(fwhm) & (fwhm > 0)          # no H-alpha to measure: left as the grid gives it
+        sigma_v = np.where(ok, fwhm, 1.0) / analysis.FWHM_PER_SIGMA * unyt_array(1.0, "km/s")
+        for p in ("AGN_total", "AGN_reprocessed"):
+            if p in part_lnu and ok.any():
+                part_lnu[p] = bh_sed(p).doppler_broaden(sigma_v, mask=ok).lnu.to("erg/s/Hz").value.sum(axis=0)
+        props["agn_line_fwhm_kms"] = [float(x) for x in fwhm]
     aperture_seds, aperture_phot = {}, {}
     for c in SAVED:
         lnu = sum(part_lnu[p] for p in parts[c])
@@ -647,7 +672,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
         "deblend_contrast": DEBLEND_CONTRAST, "aperture_r_half": APERTURE_R_HALF, "sfr_young_age_Myr": SFR_AGE.to("Myr").value,
         "compactness_radii_arcsec": COMPACTNESS_RADII, "compactness_method": COMPACTNESS_METHOD,
         "compactness_image": COMPACTNESS_IMAGE, "compactness_mask": COMPACTNESS_MASK, "compactness_centres": COMPACTNESS_CENTRES,
-        "detect_smooth": DETECT_SMOOTH, "image_photometry": list(IMAGE_PHOTOMETRY),
+        "detect_smooth": DETECT_SMOOTH, "image_photometry": list(IMAGE_PHOTOMETRY), "agn_line_width": AGN_LINE_WIDTH,
     }
     source_values = {
         "segmentation_ok": segmentation_ok, "source_label": label,
@@ -734,6 +759,16 @@ def observe(job, snap, snap_number, sidx, out_dir):
                                         agn_lnu=agn_lnu)
         shape["v_shaped"] = bool(analysis.v_shaped(shape["beta_uv"], shape["beta_opt"]))
         row |= {f"spec_{k}": v for k, v in shape.items()}
+    if LINE_CHECKS:     # before any broadening of the AGN lines
+        rest_aa = grid.lam.to("angstrom").value
+        row |= {f"line_{k}": v for k, v in analysis.line_checks(rest_aa, sum(lines_lnu[p] for p in parts["total"])).items()}
+        if "AGN_total" in lines_lnu:
+            row |= {f"line_agn_{k}": v for k, v in analysis.line_checks(rest_aa, lines_lnu["AGN_total"]).items()}
+    if PRISM_SPECTRUM:
+        prism_um, prism_njy = analysis.prism_spectrum(aperture_seds["total"].obslam.to("angstrom").value,
+                                                      aperture_seds["total"].fnu.to("nJy").value,
+                                                      PRISM_DISPERSION_FILE, PRISM_POINT_SOURCE_FACTOR)
+        np.savez(Path(out_dir) / f"{stem}_prism.npz", lam_um=prism_um, fnu_nJy=prism_njy)
     known = [p for p in peaks if p is not None]
     row |= {"seconds": round(time.time() - t_start, 1), "peak_memory_gb": round(max(known), 2) if known else np.nan,
             "files": stem}
