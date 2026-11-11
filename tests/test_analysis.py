@@ -7,7 +7,7 @@ from unyt import kpc
 from smock.analysis import (aperture_flux, centred_window, compactness, compactness_centres, cut_window,
                             half_mass_radius, image_centre, in_mask, pick_source, pixel_distances,
                             lrd_selection_ambra, lrd_selection_kokorev24, lrd_selection_rinaldi25,
-                            lrd_selection_rinaldi26, lrd_source_quality,
+                            lrd_selection_rinaldi26, lrd_selection_vshape, lrd_compact, lrd_source_quality,
                             pixel_indices, segment)
 
 
@@ -224,7 +224,7 @@ def test_lrd_ambra_red2_strict_and_cuts():
 def test_lrd_kokorev24():
     m = _mags(F115W=1.6, F150W=1.5, F200W=1.5, F277W=0.7, F356W=0.0)   # red1: 0.1, 0.8, 1.5
     assert lrd_selection_kokorev24(m, 1.5)["lrd"]
-    assert not lrd_selection_kokorev24(m, 1.7)["lrd"]                   # strictly below 1.7
+    assert not lrd_selection_kokorev24(m, 1.71)["lrd"]                  # the same rule as "ambra": up to 1.7
     bd = {**m, "F115W": 26.0 + 0.9}                                     # F115W-F200W = -0.6
     s = lrd_selection_kokorev24(bd, 1.5)
     assert not s["not_brown_dwarf"] and not s["lrd"]
@@ -251,6 +251,15 @@ def test_lrd_rinaldi26():
     bd = _mags(F115W=3.5, F150W=3.5, F200W=3.5, F277W=3.0)             # red 3.0 > 0.4 x 0.5 + 1.9: brown-dwarf locus
     s = lrd_selection_rinaldi26(bd, 0.04)
     assert s["blue"] and s["red"] and not s["not_brown_dwarf"] and not s["lrd"]
+
+
+def test_colours_and_compactness_mix():
+    m = _mags(F115W=1.7, F150W=1.5, F200W=1.5, F277W=1.0, F356W=0.0)     # AMBRA red1
+    assert lrd_selection_ambra(m, None)["lrd"] and not lrd_selection_ambra(m, 2.5)["lrd"]   # None: colours alone
+    assert lrd_compact("ambra", 1.7) and lrd_compact("kokorev24", 1.7) and not lrd_compact("ambra", 1.71)
+    assert lrd_compact("rinaldi25", 1.6) and not lrd_compact("rinaldi25", 1.7)
+    assert lrd_compact("rinaldi26", 0.05) and not lrd_compact("rinaldi26", np.nan)
+    assert lrd_selection_vshape(-1.0, 0.5)["lrd"] and not lrd_selection_vshape(-1.0, -0.1)["lrd"]
 
 
 def test_lrd_selection_on_arrays():

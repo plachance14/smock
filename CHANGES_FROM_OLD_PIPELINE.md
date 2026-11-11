@@ -57,10 +57,10 @@ in mosaics whose stars look slightly broader than our PSF. smock can do the same
 "noisy"`, `COMPACTNESS_MASK = "others"`, `COMPACTNESS_CENTRES = "centroid"`, `PSF_SOURCE = "stpsf_mosaic"`),
 and step 15 can measure colours as photometric catalogues do (`LRD_PHOTOMETRY = "matched_circle"`).
 Step 15 also offers other published selections besides the old pipeline's (`LRD_SELECTION`: Kokorev et
-al. 2024, Rinaldi et al. 2025 and Rinaldi et al. 2026). For comparing with spectra, step 12 can give the
-spectrum a NIRSpec microshutter would record (`APERTURE_SPECTRUM = "slit"`) and broaden the AGN's lines
-(`AGN_LINE_WIDTH`), and step 15 can measure the lines (`LINE_CHECKS`) and give the spectrum at NIRSpec
-PRISM's resolution (`PRISM_SPECTRUM`).
+al. 2024, Rinaldi et al. 2025 and Rinaldi et al. 2026). For comparing with spectra, step 12 can broaden the AGN's
+lines (`AGN_LINE_WIDTH`), and step 15 can measure the lines (`LINE_CHECKS`) and select LRDs on the spectrum's
+continuum slopes (`LRD_COLOURS = "vshape"`, de Graaff et al. 2025); its colour and compactness cuts can be
+mixed (`LRD_COLOURS`, `LRD_COMPACTNESS`).
 
 ## Changes with no switch back
 

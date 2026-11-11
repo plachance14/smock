@@ -150,13 +150,8 @@ CHUNK_STARS = "auto"
 MEMORY_LIMIT_GB = None
 MEMORY_SAFETY = 0.5
 TRIAL_STARS = 500
-APERTURE_SPECTRUM = "cube"      # or "points" (the walkthrough's rule, in a second pass; "two_pass" also works), "preset",
-                                # "slit" (a NIRSpec microshutter)
-APERTURE_SPECTRUM_OPTIONS = ("cube", "points", "two_pass", "preset", "slit")
-SLIT_CENTRE = "centroid"        # for "slit": the shutter on the F444W centroid, as observers place it from the
-                                # imaging; or "bh" (the brightest black hole in the aperture)
-SLIT_PA_DEG = 0.0               # for "slit": the shutter's length along the images' first axis, turned by this
-SHUTTER_TABLE = config.NIRSPEC_DIR / "msa_shutter_throughput.npz"   # for "slit" (STPSF's NIRSpec model)
+APERTURE_SPECTRUM = "cube"      # or "points" (the walkthrough's rule, in a second pass; "two_pass" also works), "preset"
+APERTURE_SPECTRUM_OPTIONS = ("cube", "points", "two_pass", "preset")
 PRESET_APERTURE_ARCSEC = 0.5
 # 8. noise
 SEED = 1
@@ -183,7 +178,9 @@ COMPACTNESS_CENTRES = "four"    # or "centroid"
 IMAGE_PHOTOMETRY = ()
 AGN_LINE_WIDTH = None           # broad AGN lines: None, "virial" (from each BH's mass and H-alpha), or a FWHM [km/s]
 # 15. LRD selection (into the catalogue)
-LRD_SELECTION = "ambra"         # or "kokorev24", "rinaldi25", "rinaldi26" (needs RUN_STATMORPH), or None
+LRD_SELECTION = "ambra"         # or "kokorev24", "rinaldi25", "rinaldi26", "vshape", or None (no step 15)
+LRD_COLOURS = "same"            # "same": LRD_SELECTION's colours; or another selection's, or "vshape"
+LRD_COMPACTNESS = "same"        # "same": LRD_SELECTION's rule; or another ("rinaldi26" needs RUN_STATMORPH), or None
 LRD_MAX_OFFSET_CKPCH = 10.0
 LRD_PHOTOMETRY = "particles"    # or "psf", "noisy" (IMAGE_PHOTOMETRY), "matched_circle", "matched_circle_noisy"
 LRD_CIRCLE_ARCSEC = 0.36
@@ -191,9 +188,6 @@ LRD_SNR_ARCSEC = 0.32
 SPECTRAL_SHAPES = False
 SLOPE_SPLIT_AA = 3645.0
 LINE_CHECKS = False             # line luminosities and ratios into the catalogue (line_*, line_agn_*)
-PRISM_SPECTRUM = False          # a PRISM-like spectrum per galaxy (<stem>_prism.npz)
-PRISM_DISPERSION_FILE = config.NIRSPEC_DIR / "jwst_nirspec_prism_disp.fits"
-PRISM_POINT_SOURCE_FACTOR = 1.0
 # batch only
 QUICK_LOOK = False              # one PNG per galaxy: the image beside the spectrum
 
@@ -401,7 +395,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
     cube_kw = dict(resolution=PIXEL * kpc_per_arcsec * kpc, fov=IMAGE_FOV * kpc_per_arcsec * kpc)
     cube_shape = (*SpectralCube(lam=grid.lam, **cube_kw).npix, len(grid.lam))
     cube_gb = np.prod(cube_shape) * 8 / 1e9
-    cube_labels = STAR_LABELS if APERTURE_SPECTRUM in ("cube", "slit") else []
+    cube_labels = STAR_LABELS if APERTURE_SPECTRUM == "cube" else []
     cube_units = {}
     reserved_gb = (len(cube_labels) + 1) * cube_gb if cube_labels else 0.0
 
@@ -603,33 +597,10 @@ def observe(job, snap, snap_number, sidx, out_dir):
         "M_bh": float(bh.masses[bh_in].sum().to("Msun").value) if bh is not None else 0.0,
         "Mdot_bh": float(bh.accretion_rates[bh_in].sum().to("Msun/yr").value) if bh is not None else 0.0,
     }
-    # "slit": a NIRSpec microshutter (0.20" x 0.46"). The shutter table gives, by wavelength, the share of a point
-    # source at each position that passes it; dividing by the share at the centre gives each position's weight, so a
-    # point source at the centre keeps all its light, as after observers' slit-loss correction for point sources.
-    # It sees everything in the shutter, not only the source's segment.
-    bh_weight = None                     # black holes: weight 1 inside the aperture (bh_in), unless "slit"
-    if APERTURE_SPECTRUM == "slit":
-        shutter = np.load(SHUTTER_TABLE)
-        slit_centre = np.asarray(centroid, float)
-        if SLIT_CENTRE == "bh" and bh_in.any():
-            k = np.argmax(np.where(bh_in, bh.accretion_rates.value, -np.inf))
-            slit_centre = analysis.pixel_indices(bh_xy[k:k + 1], aperture.shape, pixel_kpc)[0].astype(float)
-        slit_coef = analysis.table_wavelength_coefficients(shutter["lam_um"], grid.lam.to("um").value * (1 + z))
-        slit_maps = analysis.shutter_weight_maps(shutter, *analysis.shutter_offsets(*np.indices(aperture.shape), slit_centre,
-                                                                                    PIXEL, SLIT_PA_DEG))
-        if bh is not None:               # each black hole's weight by wavelength, from its pixel (none outside the image)
-            bh_ij = analysis.pixel_indices(bh_xy, aperture.shape, pixel_kpc)
-            bh_maps = analysis.shutter_weight_maps(shutter, *analysis.shutter_offsets(bh_ij[:, 0], bh_ij[:, 1], slit_centre,
-                                                                                      PIXEL, SLIT_PA_DEG))
-            bh_weight = (bh_maps * (bh_ij[:, 0] >= 0)).T @ slit_coef
     if APERTURE_SPECTRUM == "cube":
         assert star_cubes[STAR_LABELS[0]].shape[:2] == aperture.shape
         part_lnu = {p: (star_cubes[p][aperture].sum(axis=0) * cube_units[p]).to("erg/s/Hz").value for p in STAR_LABELS}
         props["aperture_spectrum"] = "stars spread over their kernels (smoothed data cube)"
-    elif APERTURE_SPECTRUM == "slit":
-        part_lnu = {p: analysis.shutter_spectrum(star_cubes[p], slit_maps, slit_coef)
-                       * float((1.0 * cube_units[p]).to("erg/s/Hz").value) for p in STAR_LABELS}
-        props["aperture_spectrum"] = f"NIRSpec microshutter on the {SLIT_CENTRE}, corrected as for a point source"
     elif APERTURE_SPECTRUM in ("points", "two_pass"):
         part_lnu = {p: 0.0 for p in STAR_LABELS}
         chunks = stars_only.split(chunk_stars)
@@ -652,29 +623,26 @@ def observe(job, snap, snap_number, sidx, out_dir):
         props["aperture_spectrum"] = f"preset circle, r = {PRESET_APERTURE_ARCSEC} arcsec about the catalogue position"
     del star_cubes
     for p in BH_LABELS:
-        lnu = galaxy.black_holes.particle_spectra[p].lnu.to("erg/s/Hz").value
-        part_lnu[p] = bh_in.astype(float) @ lnu if bh_weight is None else np.sum(bh_weight * lnu, axis=0)
+        part_lnu[p] = bh_in.astype(float) @ galaxy.black_holes.particle_spectra[p].lnu.to("erg/s/Hz").value
     # broad AGN lines (AGN_LINE_WIDTH): each black hole in the aperture gets its own line width, applied with
     # synthesizer's Doppler broadening; step 15's line measurements use the spectra before this (lines_lnu)
     lines_lnu = dict(part_lnu)
     props["agn_line_fwhm_kms"] = []
-    bh_used = bh_in if bh_weight is None else bh_weight.max(axis=1) > 0
-    if AGN_LINE_WIDTH is not None and agn_on and bh_used.any():
+    if AGN_LINE_WIDTH is not None and agn_on and bh_in.any():
         def bh_sed(p):
-            """The spectra p of the black holes the aperture sees, one per black hole."""
-            return Sed(grid.lam, lnu=galaxy.black_holes.particle_spectra[p].lnu[bh_used])
+            """The aperture black holes' spectra p, one per black hole."""
+            return Sed(grid.lam, lnu=galaxy.black_holes.particle_spectra[p].lnu[bh_in])
         if AGN_LINE_WIDTH == "virial":     # the width observers' mass estimate gives for each BH's mass and H-alpha
             l_ha = [analysis.line_luminosity(grid.lam.to("angstrom").value, lnu, analysis.LINES_AA["Halpha"])
                     for lnu in bh_sed("AGN_reprocessed").lnu.to("erg/s/Hz").value]          # before dust
-            fwhm = analysis.virial_fwhm_kms(galaxy.black_holes.masses[bh_used].to("Msun").value, l_ha)
+            fwhm = analysis.virial_fwhm_kms(galaxy.black_holes.masses[bh_in].to("Msun").value, l_ha)
         else:
-            fwhm = np.full(int(bh_used.sum()), float(AGN_LINE_WIDTH))
+            fwhm = np.full(int(bh_in.sum()), float(AGN_LINE_WIDTH))
         ok = np.isfinite(fwhm) & (fwhm > 0)          # no H-alpha to measure: left as the grid gives it
         sigma_v = np.where(ok, fwhm, 1.0) / analysis.FWHM_PER_SIGMA * unyt_array(1.0, "km/s")
         for p in ("AGN_total", "AGN_reprocessed"):
             if p in part_lnu and ok.any():
-                broad = bh_sed(p).doppler_broaden(sigma_v, mask=ok).lnu.to("erg/s/Hz").value
-                part_lnu[p] = (broad if bh_weight is None else bh_weight[bh_used] * broad).sum(axis=0)
+                part_lnu[p] = bh_sed(p).doppler_broaden(sigma_v, mask=ok).lnu.to("erg/s/Hz").value.sum(axis=0)
         props["agn_line_fwhm_kms"] = [float(x) for x in fwhm]
     aperture_seds, aperture_phot = {}, {}
     for c in SAVED:
@@ -703,7 +671,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
         "deblend_contrast": DEBLEND_CONTRAST, "aperture_r_half": APERTURE_R_HALF, "sfr_young_age_Myr": SFR_AGE.to("Myr").value,
         "compactness_radii_arcsec": COMPACTNESS_RADII, "compactness_method": COMPACTNESS_METHOD,
         "compactness_image": COMPACTNESS_IMAGE, "compactness_mask": COMPACTNESS_MASK, "compactness_centres": COMPACTNESS_CENTRES,
-        "detect_smooth": DETECT_SMOOTH, "image_photometry": list(IMAGE_PHOTOMETRY), "agn_line_width": AGN_LINE_WIDTH, "slit_centre": SLIT_CENTRE, "slit_pa_deg": SLIT_PA_DEG,
+        "detect_smooth": DETECT_SMOOTH, "image_photometry": list(IMAGE_PHOTOMETRY), "agn_line_width": AGN_LINE_WIDTH,
     }
     source_values = {
         "segmentation_ok": segmentation_ok, "source_label": label,
@@ -764,25 +732,34 @@ def observe(job, snap, snap_number, sidx, out_dir):
             share = analysis.point_source_fraction(job.psfs[DETECT_FILTER], r_px)   # a point source's share of the circle
             fluxes = {fc: f / share for fc, f in fluxes.items()}   # every filter by the same factor: colours stay the circle's
         mags = {fc.split(".")[-1]: float(ab_mag(f)) for fc, f in fluxes.items()}
-        select = {"ambra": analysis.lrd_selection_ambra, "kokorev24": analysis.lrd_selection_kokorev24,
-                  "rinaldi25": analysis.lrd_selection_rinaldi25, "rinaldi26": analysis.lrd_selection_rinaldi26}[LRD_SELECTION]
+        colour_rule = LRD_SELECTION if LRD_COLOURS == "same" else LRD_COLOURS
+        compact_rule = LRD_SELECTION if LRD_COMPACTNESS == "same" else LRD_COMPACTNESS
         snr = analysis.aperture_snr(noisy[DETECT_FILTER].arr, centroid, LRD_SNR_ARCSEC / 2 / PIXEL,
                                     (job.depths[DETECT_FILTER] / 5).to("nJy").value)
-        lrd_compactness = props["compactness"]
-        if LRD_SELECTION == "rinaldi25":    # their own ratio, f(d < 0.5") / f(d < 0.25"), measured as in step 12
+        if colour_rule == "vshape":
+            slopes = analysis.spectral_shape(aperture_seds["total"].lam.to("angstrom").value,
+                                             aperture_seds["total"].lnu.to("erg/s/Hz").value, split_aa=SLOPE_SPLIT_AA)
+            colours = analysis.lrd_selection_vshape(slopes["beta_uv"], slopes["beta_opt"])
+        else:
+            select = {"ambra": analysis.lrd_selection_ambra, "kokorev24": analysis.lrd_selection_kokorev24,
+                      "rinaldi25": analysis.lrd_selection_rinaldi25, "rinaldi26": analysis.lrd_selection_rinaldi26}[colour_rule]
+            extra = {"kokorev24": {"snr": snr}, "rinaldi25": {"redshift": z}, "rinaldi26": {"snr": snr}}.get(colour_rule, {})
+            colours = select(mags, None, **extra)
+        if compact_rule == "rinaldi25":
             lrd_compactness, _, _ = analysis.compactness(c_image, keep, centres, PIXEL, analysis.RINALDI25_RADII_ARCSEC,
                                                          COMPACTNESS_METHOD)
             row["compactness_rinaldi25"] = float(lrd_compactness)
-        elif LRD_SELECTION == "rinaldi26":  # a fitted size instead: statmorph's Sersic R_e in F444W (step 11)
+        elif compact_rule == "rinaldi26":  # a fitted size instead: statmorph's Sersic R_e in F444W (step 11)
             good_fit = 0 <= morphology["morph_flag_sersic"] <= 1     # good or suspect; otherwise the source fails
             lrd_compactness = morphology["morph_sersic_rhalf_arcsec"] if good_fit else np.nan
-        extra = {"kokorev24": {"snr": snr}, "rinaldi25": {"redshift": z}, "rinaldi26": {"snr": snr}}.get(LRD_SELECTION, {})
-        colours = select(mags, lrd_compactness, **extra)
+        else:
+            lrd_compactness = props["compactness"]
+        compact = True if compact_rule is None else bool(analysis.lrd_compact(compact_rule, lrd_compactness))
         checks = analysis.lrd_source_quality(segmentation_ok, props["M_bh"], props["stellar_mass_aperture"], g["m_star_subfind"],
                                              offset_px * pixel_kpc * (1 + snap.redshift) * snap.h, max_offset_ckpch=LRD_MAX_OFFSET_CKPCH)
         row["F444W_snr"] = float(snr)
-        row |= {"lrd_colours": bool(colours["lrd"]), "lrd_checks_ok": bool(checks["ok"]),
-                "lrd": bool(colours["lrd"] and checks["ok"])}
+        row |= {"lrd_colours": bool(colours["lrd"]), "lrd_compact": compact, "lrd_checks_ok": bool(checks["ok"]),
+                "lrd": bool(colours["lrd"]) and compact and bool(checks["ok"])}
     if SPECTRAL_SHAPES:     # the aperture spectrum's continuum shape (rest frame, f_lambda ~ lambda^beta)
         agn_lnu = aperture_seds["AGN_total"].lnu.to("erg/s/Hz").value if "AGN_total" in aperture_seds else None
         shape = analysis.spectral_shape(aperture_seds["total"].lam.to("angstrom").value,
@@ -795,11 +772,6 @@ def observe(job, snap, snap_number, sidx, out_dir):
         row |= {f"line_{k}": v for k, v in analysis.line_checks(rest_aa, sum(lines_lnu[p] for p in parts["total"])).items()}
         if "AGN_total" in lines_lnu:
             row |= {f"line_agn_{k}": v for k, v in analysis.line_checks(rest_aa, lines_lnu["AGN_total"]).items()}
-    if PRISM_SPECTRUM:
-        prism_um, prism_njy = analysis.prism_spectrum(aperture_seds["total"].obslam.to("angstrom").value,
-                                                      aperture_seds["total"].fnu.to("nJy").value,
-                                                      PRISM_DISPERSION_FILE, PRISM_POINT_SOURCE_FACTOR)
-        np.savez(Path(out_dir) / f"{stem}_prism.npz", lam_um=prism_um, fnu_nJy=prism_njy)
     known = [p for p in peaks if p is not None]
     row |= {"seconds": round(time.time() - t_start, 1), "peak_memory_gb": round(max(known), 2) if known else np.nan,
             "files": stem}

@@ -72,4 +72,3 @@ GRID_DIR = Path(os.environ.get("SYNTHESIZER_GRID_DIR") or SYNTHESIZER_DIR / "gri
 INSTRUMENT_DIR = Path(os.environ.get("SYNTHESIZER_INSTRUMENT_CACHE") or SYNTHESIZER_DIR / "instrument_cache")
 PSF_DIR = INSTRUMENT_DIR / "psfs"        # our STPSF NIRCam PSFs (made by smock-recipes/psfs)
 NOISE_DIR = INSTRUMENT_DIR / "noise"     # blank-sky noise templates (optional, to come)
-NIRSPEC_DIR = INSTRUMENT_DIR / "nirspec"  # NIRSpec files: PRISM resolution (STScI's jwst_nirspec_prism_disp.fits)

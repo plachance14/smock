@@ -347,6 +347,7 @@ def turnover_wavelength(lam_aa, lnu, lo_aa=1500.0, hi_aa=6000.0, break_aa=(2500.
 LINES_AA = {"Halpha": 6562.80, "Hbeta": 4861.32, "OIII_5007": 5006.84, "OI_8446": 8446.4,
             "Pabeta": 12818.1, "Paalpha": 18751.0}
 C_KMS = 2.99792458e5
+FWHM_PER_SIGMA = 2.0 * np.sqrt(2.0 * np.log(2.0))
 
 
 def line_luminosity(lam_aa, lnu_erg_s_hz, line_aa, half_width_kms=1500.0, side_kms=(3000.0, 6000.0)):
@@ -410,106 +411,6 @@ def virial_fwhm_kms(m_bh_msun, l_halpha_erg_s, epsilon=1.075):
         return np.where((lha > 0) & (m > 0), 10**log_fwhm, np.nan)
 
 
-# ---- a NIRSpec PRISM-like spectrum -----------------------------------------------------------
-FWHM_PER_SIGMA = 2.0 * np.sqrt(2.0 * np.log(2.0))
-
-
-def degrade_resolution(lam_um, flam, r_of_lam, samples_per_fwhm=10):
-    """Blur a spectrum to a resolving power R(lambda) = lambda / FWHM that changes with wavelength.
-
-    lam_um [um, increasing], flam: flux density per unit wavelength (any units); r_of_lam: function of lam_um.
-    The spectrum is moved to the coordinate u = integral of R / lambda d lambda, in which every resolution
-    element has the same width (1), convolved there with a Gaussian of FWHM 1, and moved back; the total
-    flux is kept. Returns flam on lam_um.
-    """
-    from scipy.ndimage import gaussian_filter1d
-    from spectres import spectres
-    lam, flam = np.asarray(lam_um, float), np.asarray(flam, float)
-    du_dlam = r_of_lam(lam) / lam
-    u = np.concatenate([[0.0], np.cumsum(0.5 * (du_dlam[1:] + du_dlam[:-1]) * np.diff(lam))])
-    u_grid = np.arange(u[0], u[-1], 1.0 / samples_per_fwhm)[1:-1]
-    f_u = spectres(u_grid, u, flam / du_dlam, fill=0.0, verbose=False)      # flux per unit u, summed into bins
-    f_u = gaussian_filter1d(f_u, sigma=samples_per_fwhm / FWHM_PER_SIGMA, mode="nearest")
-    return np.interp(u, u_grid, f_u) * du_dlam
-
-
-def prism_spectrum(obs_lam_aa, fnu, dispersion_file, point_source_factor=1.0, lam_range_um=(0.6, 5.3)):
-    """The observed spectrum as NIRSpec's PRISM would record it: blurred to its resolving power and summed into its
-    detector pixels. No noise, slit losses or throughput.
-
-    obs_lam_aa [observed A], fnu (any f_nu units, e.g. nJy); dispersion_file: STScI's jwst_nirspec_prism_disp.fits
-    (JDox, "NIRSpec dispersers and filters": WAVELENGTH [um], DLDS [um per pixel], R), whose R is for a slit
-    filled with light; point_source_factor multiplies it (a compact source gives a sharper spectrum).
-    Returns (lam_um at the pixel centres, fnu in the pixels, in the input units).
-    """
-    from astropy.io import fits
-    from spectres import spectres
-    with fits.open(dispersion_file) as h:
-        d = h[1].data
-        w, dlds, r = (np.asarray(d[k], float) for k in ("WAVELENGTH", "DLDS", "R"))
-    r_of = lambda lam: point_source_factor * np.interp(lam, w, r)
-    lam = np.asarray(obs_lam_aa, float) / 1e4
-    keep = (lam > lam_range_um[0] * 0.8) & (lam < lam_range_um[1] * 1.2)
-    lam, f = lam[keep], np.asarray(fnu, float)[keep]
-    flam = f / lam**2                                                         # per unit wavelength (relative)
-    blurred = degrade_resolution(lam, flam, r_of)
-    pixels = [lam_range_um[0]]
-    while pixels[-1] < lam_range_um[1]:
-        pixels.append(pixels[-1] + float(np.interp(pixels[-1], w, dlds)))
-    pixels = np.array(pixels)
-    binned = spectres(pixels, lam, blurred, fill=np.nan, verbose=False)
-    return pixels, binned * pixels**2
-
-
-# ---- a NIRSpec microshutter spectrum -----------------------------------------------------------
-# A shutter passes the part of the telescope's image that falls on its open area (0.20" x 0.46"); observers then
-# correct the spectrum for the light a centred point source loses. The shutter table (smock.config.NIRSPEC_DIR,
-# msa_shutter_throughput.npz) gives, at each of a few wavelengths, the share of a point source at each offset from
-# the shutter's centre that passes it. Dividing by the centred share gives each position's weight: a point source
-# at the centre keeps all its light, extended light is cut as in the data.
-
-def shutter_weight_maps(table, dx_arcsec, dy_arcsec):
-    """Weights at the given offsets from the shutter's centre (arrays [arcsec], dx across the shutter, dy along its
-    length), one map per table wavelength: share / centred share, 0 beyond the table's +-1". table: the loaded npz
-    (lam_um, offset_arcsec, share[lam, dy, dx]). Returns an array (n_table_lam, *dx.shape)."""
-    from scipy.interpolate import RegularGridInterpolator
-    off, share = np.asarray(table["offset_arcsec"], float), np.asarray(table["share"], float)
-    centre = len(off) // 2
-    pts = np.stack([np.asarray(dy_arcsec, float).ravel(), np.asarray(dx_arcsec, float).ravel()], axis=-1)
-    maps = [RegularGridInterpolator((off, off), s / s[centre, centre], bounds_error=False, fill_value=0.0)(pts)
-            for s in share]
-    return np.array(maps).reshape(len(share), *np.shape(dx_arcsec))
-
-
-def table_wavelength_coefficients(table_lam_um, obs_lam_um):
-    """Linear-interpolation coefficients (n_table_lam, n_lam) that turn values at the table's wavelengths into
-    values at obs_lam_um [observed um]; the end values hold beyond the table."""
-    tl, lam = np.asarray(table_lam_um, float), np.clip(np.asarray(obs_lam_um, float), table_lam_um[0], table_lam_um[-1])
-    coef = np.zeros((len(tl), len(lam)))
-    k = np.clip(np.searchsorted(tl, lam) - 1, 0, len(tl) - 2)
-    t = (lam - tl[k]) / (tl[k + 1] - tl[k])
-    coef[k, np.arange(len(lam))] = 1 - t
-    coef[k + 1, np.arange(len(lam))] += t
-    return coef
-
-
-def shutter_offsets(i, j, centre_ij, pixel_arcsec, pa_deg=0.0):
-    """Offsets (dx, dy) [arcsec] of positions (i, j) [px, arrays; e.g. np.indices(shape) for every pixel] from the
-    shutter's centre (i, j) [px]. At pa_deg = 0 the shutter's length runs along the image's first axis (i); pa_deg
-    turns it anticlockwise."""
-    di = (np.asarray(i, float) - centre_ij[0]) * pixel_arcsec
-    dj = (np.asarray(j, float) - centre_ij[1]) * pixel_arcsec
-    c, s = np.cos(np.radians(pa_deg)), np.sin(np.radians(pa_deg))
-    return dj * c + di * s, -dj * s + di * c
-
-
-def shutter_spectrum(cube_lnu, weight_maps, coefficients):
-    """Sum of a data cube (ny, nx, n_lam) seen through the shutter: each table wavelength's weight map applied to every
-    wavelength, then interpolated in wavelength with coefficients (table_wavelength_coefficients). Returns (n_lam,)."""
-    per_table = np.tensordot(weight_maps, cube_lnu, axes=([1, 2], [0, 1]))       # (n_table_lam, n_lam)
-    return np.sum(per_table * coefficients, axis=0)
-
-
 def v_shaped(beta_uv, beta_opt, max_beta_uv=-0.2, min_beta_opt=0.0, min_difference=0.5):
     """The V-shaped continuum of Hviding et al. 2025 and de Graaff et al. 2025 (without their
     statistical margins): beta_uv < max_beta_uv, beta_opt > min_beta_opt and beta_opt - beta_uv >
@@ -525,6 +426,42 @@ def v_shaped(beta_uv, beta_opt, max_beta_uv=-0.2, min_beta_opt=0.0, min_differen
 # NaN where the flux is not positive, which fails every cut) and its compactness. They work on
 # numbers or on arrays (one entry per galaxy). The walkthrough's optional step 15 applies one
 # (LRD_SELECTION, "ambra" by default) and only reports the answer; nothing else depends on it.
+
+# Each selection has two halves that can be mixed: its colours (with the paper's other photometric cuts) and its
+# compactness. lrd_compact holds the compactness rules; each lrd_selection_* applies its own when given a value and
+# skips it when given None, so lrd_selection_ambra(mags, None) is the AMBRA colours alone.
+LRD_COMPACTNESS_RULES = {
+    "ambra": 'f(<0.2") / f(<0.1") in F444W <= 1.7 (and >= 1e-4)',
+    "kokorev24": 'the same as "ambra" (Kokorev et al. 2024 write < 1.7)',
+    "vshape": 'the same as "ambra" (de Graaff et al. 2025 use f(r<0.2") / f(r<0.1") < 1.7)',
+    "rinaldi25": 'f(d<0.5") / f(d<0.25") in F444W < 1.7 (RINALDI25_RADII_ARCSEC)',
+    "rinaldi26": "fitted F444W effective radius <= 0.06 arcsec",
+}
+
+
+def lrd_compact(rule, value):
+    """Whether a source is compact under one of LRD_COMPACTNESS_RULES; value is that rule's measurement (the
+    flux ratio, or the effective radius in arcsec for "rinaldi26"); NaN fails. Works on arrays."""
+    v = np.asarray(value, dtype=float)
+    with np.errstate(invalid="ignore"):
+        if rule in ("ambra", "kokorev24", "vshape"):
+            return (v >= 1e-4) & (v <= 1.7)
+        if rule == "rinaldi25":
+            return v < 1.7
+        if rule == "rinaldi26":
+            return v <= 0.06
+    raise ValueError(f"compactness rule {rule!r}: use one of {sorted(LRD_COMPACTNESS_RULES)}")
+
+
+def lrd_selection_vshape(beta_uv, beta_opt):
+    """A spectroscopic selection: the V-shaped continuum of de Graaff et al. 2025 (sec. 2.1; Hviding et al. 2025 use
+    the same slope cuts), beta_opt > 0, beta_uv < -0.2 and beta_opt - beta_uv > 0.5, with the slopes measured on the
+    rest-frame spectrum (spectral_shape: 1200-3645 and 3645-7000 A, lines masked; they fit the two power laws
+    joined at the Balmer limit, here they are fitted separately, and they ask for each cut in 95% of their fit's
+    samples). Their compactness is applied separately ("vshape" in lrd_compact). Returns a dict: v_shaped, lrd."""
+    v = v_shaped(beta_uv, beta_opt)
+    return dict(v_shaped=v, lrd=v)
+
 
 def lrd_selection_ambra(mags, compactness):
     """The selection of LaChance et al. 2026 (arXiv:2609.26999; LRDs in AMBRA), adapted from UNCOVER's.
@@ -544,7 +481,7 @@ def lrd_selection_ambra(mags, compactness):
         red2 = (m["F150W"] - m["F200W"] < 0.8) & (m["F277W"] - m["F444W"] > 1.0)
         strict_red1 = red1 & (m["F200W"] - m["F277W"] > 0.7)
         strict_red2 = red2 & (m["F277W"] - m["F356W"] > 0.7)
-        compact = (c >= 1e-4) & (c <= 1.7)
+        compact = lrd_compact("ambra", c) if compactness is not None else np.ones_like(bright)
     lenient = bright & (red1 | red2) & compact
     return dict(red1=red1, red2=red2, strict_red1=strict_red1, strict_red2=strict_red2, compact=compact,
                 lenient=lenient, strict=bright & (strict_red1 | strict_red2) & compact, lrd=lenient)
@@ -555,7 +492,7 @@ def lrd_selection_kokorev24(mags, compactness, snr=None, min_snr=14.0):
 
         red1: F115W - F150W < 0.8 and F200W - F277W > 0.7 and F200W - F356W > 1.0
         red2: F150W - F200W < 0.8 and F277W - F356W > 0.6 and F277W - F444W > 0.7
-        compact: f(r < 0.2") / f(r < 0.1") in F444W < 1.7
+        compact: f(r < 0.2") / f(r < 0.1") in F444W < 1.7 (treated as <= 1.7, the same rule as "ambra")
         not a brown dwarf: F115W - F200W > -0.5
         F444W < 27.7
         detected: S/N > min_snr (14) in F444W, when snr is given (measured on the noisy image, e.g.
@@ -569,9 +506,9 @@ def lrd_selection_kokorev24(mags, compactness, snr=None, min_snr=14.0):
     with np.errstate(invalid="ignore"):
         red1 = (m["F115W"] - m["F150W"] < 0.8) & (m["F200W"] - m["F277W"] > 0.7) & (m["F200W"] - m["F356W"] > 1.0)
         red2 = (m["F150W"] - m["F200W"] < 0.8) & (m["F277W"] - m["F356W"] > 0.6) & (m["F277W"] - m["F444W"] > 0.7)
-        compact = c < 1.7
         not_brown_dwarf = m["F115W"] - m["F200W"] > -0.5
         bright = m["F444W"] < 27.7
+        compact = lrd_compact("kokorev24", c) if compactness is not None else np.ones_like(bright)
         detected = np.ones_like(bright) if snr is None else np.asarray(snr, dtype=float) > min_snr
     return dict(red1=red1, red2=red2, compact=compact, not_brown_dwarf=not_brown_dwarf, detected=detected,
                 lrd=(red1 | red2) & compact & not_brown_dwarf & bright & detected)
@@ -600,7 +537,7 @@ def lrd_selection_rinaldi25(mags, compactness, redshift=None):
         blue = m["F150W"] - m["F200W"] < 0.8
         red = m["F277W"] - m["F444W"] > 0.7
         not_brown_dwarf = m["F115W"] - m["F200W"] > -0.5
-        compact = c < 1.7
+        compact = lrd_compact("rinaldi25", c) if compactness is not None else np.ones_like(blue)
         in_redshift = (np.ones_like(compact) if redshift is None
                        else (np.asarray(redshift, dtype=float) >= 4.0) & (np.asarray(redshift, dtype=float) <= 8.0))
     return dict(blue=blue, red=red, not_brown_dwarf=not_brown_dwarf, compact=compact, in_redshift=in_redshift,
@@ -627,7 +564,7 @@ def lrd_selection_rinaldi26(mags, r_eff_arcsec, snr=None, max_r_eff_arcsec=0.06,
     with np.errstate(invalid="ignore"):
         blue = m["F150W"] - m["F200W"] < 1.0
         red = m["F277W"] - m["F444W"] > 0.5
-        compact = r <= max_r_eff_arcsec
+        compact = (r <= max_r_eff_arcsec) if r_eff_arcsec is not None else np.ones_like(blue)
         uv_ir = m["F115W"] - m["F277W"]
         not_brown_dwarf = ((m["F115W"] - m["F200W"] > -0.5) & (m["F277W"] - m["F444W"] < 0.4 * uv_ir + 1.9)
                            & (uv_ir > -0.5))
