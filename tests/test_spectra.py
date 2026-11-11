@@ -79,7 +79,7 @@ def _toy_table():
 def test_shutter_weights_and_spectrum():
     from smock.analysis import shutter_offsets, shutter_spectrum, shutter_weight_maps, table_wavelength_coefficients
     table = _toy_table()
-    dx, dy = shutter_offsets((61, 61), (30, 30), 0.03)
+    dx, dy = shutter_offsets(*np.indices((61, 61)), (30, 30), 0.03)
     w = shutter_weight_maps(table, dx, dy)
     assert w.shape == (2, 61, 61) and np.allclose(w[:, 30, 30], 1.0)          # the centre keeps everything
     assert w[0, 30, 0] < 1e-3                                                  # 0.9" across the shutter: almost nothing
@@ -90,5 +90,5 @@ def test_shutter_weights_and_spectrum():
     cube[30, 30] = 1.0                                                         # a point source at the centre
     cube[30, 0] = 1.0                                                          # and one far off across the shutter
     assert np.allclose(shutter_spectrum(cube, w, coef), 1.0, atol=1e-3)
-    dx90, dy90 = shutter_offsets((61, 61), (30, 30), 0.03, pa_deg=90.0)        # turned: the length now runs along j
+    dx90, dy90 = shutter_offsets(*np.indices((61, 61)), (30, 30), 0.03, pa_deg=90.0)        # turned: the length now runs along j
     assert abs(shutter_weight_maps(table, dx90, dy90)[0, 30, 30 + 7] - 1.0) < 1e-6

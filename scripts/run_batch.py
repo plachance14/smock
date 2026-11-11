@@ -150,8 +150,13 @@ CHUNK_STARS = "auto"
 MEMORY_LIMIT_GB = None
 MEMORY_SAFETY = 0.5
 TRIAL_STARS = 500
-APERTURE_SPECTRUM = "cube"      # or "points" (the walkthrough's rule, in a second pass; "two_pass" also works), "preset"
-APERTURE_SPECTRUM_OPTIONS = ("cube", "points", "two_pass", "preset")
+APERTURE_SPECTRUM = "cube"      # or "points" (the walkthrough's rule, in a second pass; "two_pass" also works), "preset",
+                                # "slit" (a NIRSpec microshutter)
+APERTURE_SPECTRUM_OPTIONS = ("cube", "points", "two_pass", "preset", "slit")
+SLIT_CENTRE = "centroid"        # for "slit": the shutter on the F444W centroid, as observers place it from the
+                                # imaging; or "bh" (the brightest black hole in the aperture)
+SLIT_PA_DEG = 0.0               # for "slit": the shutter's length along the images' first axis, turned by this
+SHUTTER_TABLE = config.NIRSPEC_DIR / "msa_shutter_throughput.npz"   # for "slit" (STPSF's NIRSpec model)
 PRESET_APERTURE_ARCSEC = 0.5
 # 8. noise
 SEED = 1
@@ -396,7 +401,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
     cube_kw = dict(resolution=PIXEL * kpc_per_arcsec * kpc, fov=IMAGE_FOV * kpc_per_arcsec * kpc)
     cube_shape = (*SpectralCube(lam=grid.lam, **cube_kw).npix, len(grid.lam))
     cube_gb = np.prod(cube_shape) * 8 / 1e9
-    cube_labels = STAR_LABELS if APERTURE_SPECTRUM == "cube" else []
+    cube_labels = STAR_LABELS if APERTURE_SPECTRUM in ("cube", "slit") else []
     cube_units = {}
     reserved_gb = (len(cube_labels) + 1) * cube_gb if cube_labels else 0.0
 
@@ -598,10 +603,33 @@ def observe(job, snap, snap_number, sidx, out_dir):
         "M_bh": float(bh.masses[bh_in].sum().to("Msun").value) if bh is not None else 0.0,
         "Mdot_bh": float(bh.accretion_rates[bh_in].sum().to("Msun/yr").value) if bh is not None else 0.0,
     }
+    # "slit": a NIRSpec microshutter (0.20" x 0.46"). The shutter table gives, by wavelength, the share of a point
+    # source at each position that passes it; dividing by the share at the centre gives each position's weight, so a
+    # point source at the centre keeps all its light, as after observers' slit-loss correction for point sources.
+    # It sees everything in the shutter, not only the source's segment.
+    bh_weight = None                     # black holes: weight 1 inside the aperture (bh_in), unless "slit"
+    if APERTURE_SPECTRUM == "slit":
+        shutter = np.load(SHUTTER_TABLE)
+        slit_centre = np.asarray(centroid, float)
+        if SLIT_CENTRE == "bh" and bh_in.any():
+            k = np.argmax(np.where(bh_in, bh.accretion_rates.value, -np.inf))
+            slit_centre = analysis.pixel_indices(bh_xy[k:k + 1], aperture.shape, pixel_kpc)[0].astype(float)
+        slit_coef = analysis.table_wavelength_coefficients(shutter["lam_um"], grid.lam.to("um").value * (1 + z))
+        slit_maps = analysis.shutter_weight_maps(shutter, *analysis.shutter_offsets(*np.indices(aperture.shape), slit_centre,
+                                                                                    PIXEL, SLIT_PA_DEG))
+        if bh is not None:               # each black hole's weight by wavelength, from its pixel (none outside the image)
+            bh_ij = analysis.pixel_indices(bh_xy, aperture.shape, pixel_kpc)
+            bh_maps = analysis.shutter_weight_maps(shutter, *analysis.shutter_offsets(bh_ij[:, 0], bh_ij[:, 1], slit_centre,
+                                                                                      PIXEL, SLIT_PA_DEG))
+            bh_weight = (bh_maps * (bh_ij[:, 0] >= 0)).T @ slit_coef
     if APERTURE_SPECTRUM == "cube":
         assert star_cubes[STAR_LABELS[0]].shape[:2] == aperture.shape
         part_lnu = {p: (star_cubes[p][aperture].sum(axis=0) * cube_units[p]).to("erg/s/Hz").value for p in STAR_LABELS}
         props["aperture_spectrum"] = "stars spread over their kernels (smoothed data cube)"
+    elif APERTURE_SPECTRUM == "slit":
+        part_lnu = {p: analysis.shutter_spectrum(star_cubes[p], slit_maps, slit_coef)
+                       * float((1.0 * cube_units[p]).to("erg/s/Hz").value) for p in STAR_LABELS}
+        props["aperture_spectrum"] = f"NIRSpec microshutter on the {SLIT_CENTRE}, corrected as for a point source"
     elif APERTURE_SPECTRUM in ("points", "two_pass"):
         part_lnu = {p: 0.0 for p in STAR_LABELS}
         chunks = stars_only.split(chunk_stars)
@@ -624,26 +652,29 @@ def observe(job, snap, snap_number, sidx, out_dir):
         props["aperture_spectrum"] = f"preset circle, r = {PRESET_APERTURE_ARCSEC} arcsec about the catalogue position"
     del star_cubes
     for p in BH_LABELS:
-        part_lnu[p] = bh_in.astype(float) @ galaxy.black_holes.particle_spectra[p].lnu.to("erg/s/Hz").value
+        lnu = galaxy.black_holes.particle_spectra[p].lnu.to("erg/s/Hz").value
+        part_lnu[p] = bh_in.astype(float) @ lnu if bh_weight is None else np.sum(bh_weight * lnu, axis=0)
     # broad AGN lines (AGN_LINE_WIDTH): each black hole in the aperture gets its own line width, applied with
     # synthesizer's Doppler broadening; step 15's line measurements use the spectra before this (lines_lnu)
     lines_lnu = dict(part_lnu)
     props["agn_line_fwhm_kms"] = []
-    if AGN_LINE_WIDTH is not None and agn_on and bh_in.any():
+    bh_used = bh_in if bh_weight is None else bh_weight.max(axis=1) > 0
+    if AGN_LINE_WIDTH is not None and agn_on and bh_used.any():
         def bh_sed(p):
-            """The aperture black holes' spectra p, one per black hole."""
-            return Sed(grid.lam, lnu=galaxy.black_holes.particle_spectra[p].lnu[bh_in])
+            """The spectra p of the black holes the aperture sees, one per black hole."""
+            return Sed(grid.lam, lnu=galaxy.black_holes.particle_spectra[p].lnu[bh_used])
         if AGN_LINE_WIDTH == "virial":     # the width observers' mass estimate gives for each BH's mass and H-alpha
             l_ha = [analysis.line_luminosity(grid.lam.to("angstrom").value, lnu, analysis.LINES_AA["Halpha"])
                     for lnu in bh_sed("AGN_reprocessed").lnu.to("erg/s/Hz").value]          # before dust
-            fwhm = analysis.virial_fwhm_kms(galaxy.black_holes.masses[bh_in].to("Msun").value, l_ha)
+            fwhm = analysis.virial_fwhm_kms(galaxy.black_holes.masses[bh_used].to("Msun").value, l_ha)
         else:
-            fwhm = np.full(int(bh_in.sum()), float(AGN_LINE_WIDTH))
+            fwhm = np.full(int(bh_used.sum()), float(AGN_LINE_WIDTH))
         ok = np.isfinite(fwhm) & (fwhm > 0)          # no H-alpha to measure: left as the grid gives it
         sigma_v = np.where(ok, fwhm, 1.0) / analysis.FWHM_PER_SIGMA * unyt_array(1.0, "km/s")
         for p in ("AGN_total", "AGN_reprocessed"):
             if p in part_lnu and ok.any():
-                part_lnu[p] = bh_sed(p).doppler_broaden(sigma_v, mask=ok).lnu.to("erg/s/Hz").value.sum(axis=0)
+                broad = bh_sed(p).doppler_broaden(sigma_v, mask=ok).lnu.to("erg/s/Hz").value
+                part_lnu[p] = (broad if bh_weight is None else bh_weight[bh_used] * broad).sum(axis=0)
         props["agn_line_fwhm_kms"] = [float(x) for x in fwhm]
     aperture_seds, aperture_phot = {}, {}
     for c in SAVED:
@@ -672,7 +703,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
         "deblend_contrast": DEBLEND_CONTRAST, "aperture_r_half": APERTURE_R_HALF, "sfr_young_age_Myr": SFR_AGE.to("Myr").value,
         "compactness_radii_arcsec": COMPACTNESS_RADII, "compactness_method": COMPACTNESS_METHOD,
         "compactness_image": COMPACTNESS_IMAGE, "compactness_mask": COMPACTNESS_MASK, "compactness_centres": COMPACTNESS_CENTRES,
-        "detect_smooth": DETECT_SMOOTH, "image_photometry": list(IMAGE_PHOTOMETRY), "agn_line_width": AGN_LINE_WIDTH,
+        "detect_smooth": DETECT_SMOOTH, "image_photometry": list(IMAGE_PHOTOMETRY), "agn_line_width": AGN_LINE_WIDTH, "slit_centre": SLIT_CENTRE, "slit_pa_deg": SLIT_PA_DEG,
     }
     source_values = {
         "segmentation_ok": segmentation_ok, "source_label": label,

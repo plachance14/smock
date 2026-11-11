@@ -493,11 +493,12 @@ def table_wavelength_coefficients(table_lam_um, obs_lam_um):
     return coef
 
 
-def shutter_offsets(shape, centre_ij, pixel_arcsec, pa_deg=0.0):
-    """Offsets (dx, dy) [arcsec] of every pixel of an image of this shape from the shutter's centre (i, j) [px]. At
-    pa_deg = 0 the shutter's length runs along the image's first axis (i); pa_deg turns it anticlockwise."""
-    i, j = np.indices(shape, dtype=float)
-    di, dj = (i - centre_ij[0]) * pixel_arcsec, (j - centre_ij[1]) * pixel_arcsec
+def shutter_offsets(i, j, centre_ij, pixel_arcsec, pa_deg=0.0):
+    """Offsets (dx, dy) [arcsec] of positions (i, j) [px, arrays; e.g. np.indices(shape) for every pixel] from the
+    shutter's centre (i, j) [px]. At pa_deg = 0 the shutter's length runs along the image's first axis (i); pa_deg
+    turns it anticlockwise."""
+    di = (np.asarray(i, float) - centre_ij[0]) * pixel_arcsec
+    dj = (np.asarray(j, float) - centre_ij[1]) * pixel_arcsec
     c, s = np.cos(np.radians(pa_deg)), np.sin(np.radians(pa_deg))
     return dj * c + di * s, -dj * s + di * c
 
