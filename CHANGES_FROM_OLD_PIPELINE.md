@@ -56,6 +56,8 @@ differently: on the noisy image, at the source's centroid, keeping the faint lig
 in mosaics whose stars look slightly broader than our PSF. smock can do the same (`COMPACTNESS_IMAGE =
 "noisy"`, `COMPACTNESS_MASK = "others"`, `COMPACTNESS_CENTRES = "centroid"`, `PSF_SOURCE = "stpsf_mosaic"`),
 and step 15 can measure colours as photometric catalogues do (`LRD_PHOTOMETRY = "matched_circle"`).
+Step 15 also offers other published selections besides the old pipeline's (`LRD_SELECTION`: Kokorev et
+al. 2024, Rinaldi et al. 2025 and Rinaldi et al. 2026).
 
 ## Changes with no switch back
 

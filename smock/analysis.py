@@ -229,8 +229,9 @@ def matched_circle_fluxes(raw_images, psf, centre, radius_px, noise=None):
     centred, odd-sized; centre (i, j) [px], e.g. the F444W centroid; radius_px [px] (0.18" / pixel for
     Kokorev et al. 2024's 0.36" diameter); noise: None, or {band: 2D noise image} added after the
     convolution. Every band is convolved with the same PSF, so the circle sees the same part of the
-    galaxy in each. Returns {band: flux in the circle} (image units). For a total flux, divide by
-    point_source_fraction(psf, radius_px), as the catalogues do for compact sources.
+    galaxy in each. Returns {band: flux in the circle} (image units). For total fluxes, divide every band
+    by the same point_source_fraction(psf, radius_px), as the catalogues do for compact sources: the bands
+    share one PSF, so the colours stay those of the circle (correcting one band alone would change them).
     """
     out = {}
     for band, img in raw_images.items():
@@ -372,6 +373,65 @@ def lrd_selection_kokorev24(mags, compactness, snr=None, min_snr=14.0):
         detected = np.ones_like(bright) if snr is None else np.asarray(snr, dtype=float) > min_snr
     return dict(red1=red1, red2=red2, compact=compact, not_brown_dwarf=not_brown_dwarf, detected=detected,
                 lrd=(red1 | red2) & compact & not_brown_dwarf & bright & detected)
+
+
+RINALDI25_RADII_ARCSEC = (0.125, 0.25)      # their compactness: f(d < 0.5") / f(d < 0.25"), radii in arcsec
+
+
+def lrd_selection_rinaldi25(mags, compactness, redshift=None):
+    """Rinaldi et al. 2025 (arXiv:2411.14383, sec. 2.2), LRDs in JADES GOODS-N and GOODS-S:
+
+        blue slope: F150W - F200W < 0.8
+        red slope: F277W - F444W > 0.7
+        not a brown dwarf: F115W - F200W > -0.5
+        compact: f(d < 0.5") / f(d < 0.25") in F444W < 1.7 (RINALDI25_RADII_ARCSEC; a different
+                 ratio from the other selections' f(< 0.2") / f(< 0.1"), so measure it at these radii)
+        redshift between 4 and 8, when redshift is given (theirs are photometric)
+
+    They measured colours in 0.5"-diameter circles. Their visual check of each source and its SED,
+    which kept 99 of about 350 candidates, is left out, so this selection lets in more than theirs.
+    Returns a dict of booleans: blue, red, not_brown_dwarf, compact, in_redshift, lrd.
+    """
+    m = {band: np.asarray(value, dtype=float) for band, value in mags.items()}
+    c = np.asarray(compactness, dtype=float)
+    with np.errstate(invalid="ignore"):
+        blue = m["F150W"] - m["F200W"] < 0.8
+        red = m["F277W"] - m["F444W"] > 0.7
+        not_brown_dwarf = m["F115W"] - m["F200W"] > -0.5
+        compact = c < 1.7
+        in_redshift = (np.ones_like(compact) if redshift is None
+                       else (np.asarray(redshift, dtype=float) >= 4.0) & (np.asarray(redshift, dtype=float) <= 8.0))
+    return dict(blue=blue, red=red, not_brown_dwarf=not_brown_dwarf, compact=compact, in_redshift=in_redshift,
+                lrd=blue & red & not_brown_dwarf & compact & in_redshift)
+
+
+def lrd_selection_rinaldi26(mags, r_eff_arcsec, snr=None, max_r_eff_arcsec=0.06, min_snr=3.0):
+    """Rinaldi et al. 2026 (arXiv:2604.07138, sec. 3.2.4), LRDs in JADES DR5; Rinaldi et al. 2025's colours relaxed:
+
+        blue slope: F150W - F200W < 1.0
+        red slope: F277W - F444W > 0.5
+        compact: a fitted size instead of a flux ratio, the F444W effective radius r_eff_arcsec [arcsec]
+                 <= max_r_eff_arcsec (0.06", "consistent with being unresolved"); they fit a single Sersic
+                 profile with the PSF (pysersic). NaN (no good fit) fails
+        not a brown dwarf: F115W - F200W > -0.5 (Greene et al. 2024), and outside Hainline et al. 2025's
+                 brown-dwarf locus: F277W - F444W < 0.4 (F115W - F277W) + 1.9 and F115W - F277W > -0.5
+        detected: S/N > min_snr (3) in F444W, when snr is given
+
+    Their visual check of each candidate (which kept 321 of 816) is left out, so this selection lets in
+    more than theirs. Returns a dict of booleans: blue, red, compact, not_brown_dwarf, detected, lrd.
+    """
+    m = {band: np.asarray(value, dtype=float) for band, value in mags.items()}
+    r = np.asarray(r_eff_arcsec, dtype=float)
+    with np.errstate(invalid="ignore"):
+        blue = m["F150W"] - m["F200W"] < 1.0
+        red = m["F277W"] - m["F444W"] > 0.5
+        compact = r <= max_r_eff_arcsec
+        uv_ir = m["F115W"] - m["F277W"]
+        not_brown_dwarf = ((m["F115W"] - m["F200W"] > -0.5) & (m["F277W"] - m["F444W"] < 0.4 * uv_ir + 1.9)
+                           & (uv_ir > -0.5))
+        detected = np.ones_like(blue) if snr is None else np.asarray(snr, dtype=float) > min_snr
+    return dict(blue=blue, red=red, compact=compact, not_brown_dwarf=not_brown_dwarf, detected=detected,
+                lrd=blue & red & compact & not_brown_dwarf & detected)
 
 
 def lrd_source_quality(segmentation_ok, bh_mass, stellar_mass, subfind_stellar_mass, offset_ckpch,

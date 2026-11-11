@@ -6,7 +6,8 @@ from unyt import kpc
 
 from smock.analysis import (aperture_flux, centred_window, compactness, compactness_centres, cut_window,
                             half_mass_radius, image_centre, in_mask, pick_source, pixel_distances,
-                            lrd_selection_ambra, lrd_selection_kokorev24, lrd_source_quality,
+                            lrd_selection_ambra, lrd_selection_kokorev24, lrd_selection_rinaldi25,
+                            lrd_selection_rinaldi26, lrd_source_quality,
                             pixel_indices, segment)
 
 
@@ -227,6 +228,29 @@ def test_lrd_kokorev24():
     bd = {**m, "F115W": 26.0 + 0.9}                                     # F115W-F200W = -0.6
     s = lrd_selection_kokorev24(bd, 1.5)
     assert not s["not_brown_dwarf"] and not s["lrd"]
+
+
+def test_lrd_rinaldi25():
+    m = _mags(F115W=1.5, F150W=1.5, F200W=1.0, F277W=0.8)             # 0.5 blue, 0.8 red, F115W-F200W 0.5
+    assert lrd_selection_rinaldi25(m, 1.5)["lrd"]
+    assert lrd_selection_rinaldi25(m, 1.5, redshift=6.0)["lrd"]
+    assert not lrd_selection_rinaldi25(m, 1.5, redshift=3.5)["lrd"]     # outside z = 4-8
+    assert not lrd_selection_rinaldi25(m, 1.7)["lrd"]                   # strictly below 1.7
+    assert not lrd_selection_rinaldi25({**m, "F277W": 26.6}, 1.5)["red"]   # F277W-F444W 0.6
+    s = lrd_selection_rinaldi25({**m, "F115W": 26.4}, 1.5)               # F115W-F200W = -0.6
+    assert not s["not_brown_dwarf"] and not s["lrd"]
+
+
+def test_lrd_rinaldi26():
+    m = _mags(F115W=1.5, F150W=1.5, F200W=1.0, F277W=0.6)             # 0.5 blue, 0.6 red, F115W-F277W 0.9
+    assert lrd_selection_rinaldi26(m, 0.04)["lrd"]
+    assert not lrd_selection_rinaldi26(m, 0.08)["lrd"]                   # resolved
+    assert not lrd_selection_rinaldi26(m, np.nan)["lrd"]                 # no good Sersic fit
+    assert not lrd_selection_rinaldi26(m, 0.04, snr=2.0)["lrd"]          # S/N <= 3
+    assert not lrd_selection_rinaldi26({**m, "F277W": 26.4}, 0.04)["red"]   # F277W-F444W 0.4
+    bd = _mags(F115W=3.5, F150W=3.5, F200W=3.5, F277W=3.0)             # red 3.0 > 0.4 x 0.5 + 1.9: brown-dwarf locus
+    s = lrd_selection_rinaldi26(bd, 0.04)
+    assert s["blue"] and s["red"] and not s["not_brown_dwarf"] and not s["lrd"]
 
 
 def test_lrd_selection_on_arrays():

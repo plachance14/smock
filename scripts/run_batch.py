@@ -177,7 +177,7 @@ COMPACTNESS_MASK = "segment"    # or "others" (sky kept, other sources set to ze
 COMPACTNESS_CENTRES = "four"    # or "centroid"
 IMAGE_PHOTOMETRY = ()
 # 15. LRD selection (into the catalogue)
-LRD_SELECTION = "ambra"         # or "kokorev24", or None
+LRD_SELECTION = "ambra"         # or "kokorev24", "rinaldi25", "rinaldi26" (needs RUN_STATMORPH), or None
 LRD_MAX_OFFSET_CKPCH = 10.0
 LRD_PHOTOMETRY = "particles"    # or "psf", "noisy" (IMAGE_PHOTOMETRY), "matched_circle", "matched_circle_noisy"
 LRD_CIRCLE_ARCSEC = 0.36
@@ -705,12 +705,23 @@ def observe(job, snap, snap_number, sidx, out_dir):
                      else None)
             fluxes = analysis.matched_circle_fluxes({fc: raw[fc].arr for fc in FILTER_CODES}, job.psfs[DETECT_FILTER],
                                                     centroid, r_px, noise)
-            fluxes[DETECT_FILTER] /= analysis.point_source_fraction(job.psfs[DETECT_FILTER], r_px)
+            share = analysis.point_source_fraction(job.psfs[DETECT_FILTER], r_px)   # a point source's share of the circle
+            fluxes = {fc: f / share for fc, f in fluxes.items()}   # every filter by the same factor: colours stay the circle's
         mags = {fc.split(".")[-1]: float(ab_mag(f)) for fc, f in fluxes.items()}
-        select = {"ambra": analysis.lrd_selection_ambra, "kokorev24": analysis.lrd_selection_kokorev24}[LRD_SELECTION]
+        select = {"ambra": analysis.lrd_selection_ambra, "kokorev24": analysis.lrd_selection_kokorev24,
+                  "rinaldi25": analysis.lrd_selection_rinaldi25, "rinaldi26": analysis.lrd_selection_rinaldi26}[LRD_SELECTION]
         snr = analysis.aperture_snr(noisy[DETECT_FILTER].arr, centroid, LRD_SNR_ARCSEC / 2 / PIXEL,
                                     (job.depths[DETECT_FILTER] / 5).to("nJy").value)
-        colours = select(mags, props["compactness"], **({"snr": snr} if LRD_SELECTION == "kokorev24" else {}))
+        lrd_compactness = props["compactness"]
+        if LRD_SELECTION == "rinaldi25":    # their own ratio, f(d < 0.5") / f(d < 0.25"), measured as in step 12
+            lrd_compactness, _, _ = analysis.compactness(c_image, keep, centres, PIXEL, analysis.RINALDI25_RADII_ARCSEC,
+                                                         COMPACTNESS_METHOD)
+            row["compactness_rinaldi25"] = float(lrd_compactness)
+        elif LRD_SELECTION == "rinaldi26":  # a fitted size instead: statmorph's Sersic R_e in F444W (step 11)
+            good_fit = 0 <= morphology["morph_flag_sersic"] <= 1     # good or suspect; otherwise the source fails
+            lrd_compactness = morphology["morph_sersic_rhalf_arcsec"] if good_fit else np.nan
+        extra = {"kokorev24": {"snr": snr}, "rinaldi25": {"redshift": z}, "rinaldi26": {"snr": snr}}.get(LRD_SELECTION, {})
+        colours = select(mags, lrd_compactness, **extra)
         checks = analysis.lrd_source_quality(segmentation_ok, props["M_bh"], props["stellar_mass_aperture"], g["m_star_subfind"],
                                              offset_px * pixel_kpc * (1 + snap.redshift) * snap.h, max_offset_ckpch=LRD_MAX_OFFSET_CKPCH)
         row["F444W_snr"] = float(snr)
