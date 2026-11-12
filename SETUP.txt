@@ -84,8 +84,8 @@ open the walkthrough. You only need to do it once.
 Optional: "pip install jupyterlab" for the Jupyter Lab interface, and "pip install pytest"
 to run the tests ("python -m pytest" from the smock folder; a couple of minutes).
 
-smock was tested with synthesizer 1.3.1. If a newer synthesizer breaks something, you can try one or multiple of the following:
-- downgrade to version 1.3.1 ("pip install cosmos-synthesizer==1.3.1")
+smock was tested with synthesizer 1.3.1 and 1.3.2. If a newer synthesizer breaks something, you can try one or multiple of the following:
+- downgrade to version 1.3.1 ("pip install cosmos-synthesizer==1.3.1"; 1.3.2 also works)
 - make changes to the smock code that breaks to align it with the new synthesizer functionality
 - get in touch with me (section 5) and I'll try to fix it or tell you how.
 
