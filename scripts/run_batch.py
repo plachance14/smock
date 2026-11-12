@@ -370,6 +370,19 @@ def build_galaxy(snap, snap_number, sidx, z_obs):
                 m_star_subfind=m_star_subfind, dust_to_metal=dust_to_metal, grid_flags=grid_flags)
 
 
+def own_smoothing_lengths(chunks):
+    """Give each chunk from synthesizer's `split` its own copy of the stars' smoothing lengths.
+
+    The chunks' arrays are views into the galaxy's own arrays, and from synthesizer 1.3.2 imaging
+    converts the smoothing lengths it is given to kpc in place. Through a view that rescales the
+    galaxy's values (by 1000) while the galaxy still labels them Mpc, so the next chunk made from
+    it would spread those stars over the whole image. A copy per chunk changes nothing in 1.3.1.
+    """
+    for chunk in chunks:
+        chunk.stars.smoothing_lengths = chunk.stars.smoothing_lengths.copy()
+    return chunks
+
+
 def observe(job, snap, snap_number, sidx, out_dir):
     """One galaxy from start to finish; returns its catalogue row (a dict)."""
     t_start = time.time()
@@ -432,7 +445,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
     if CHUNK_STARS == "auto" and n_star <= TRIAL_STARS:
         chunk_stars = n_star
     elif CHUNK_STARS == "auto":
-        trial = stars_only.split(TRIAL_STARS)[0]
+        trial = own_smoothing_lengths(stars_only.split(TRIAL_STARS))[0]
         n_trial = trial.stars.nparticles
         _, rise = memory.peak_rise_gb(run_chunk, trial, np.ones(n_trial))
         if rise is None:
@@ -451,7 +464,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
     # ---- step 8: spectra, photometry and images, chunk by chunk ----
     preset_lnu = {p: 0.0 for p in STAR_LABELS}
     star_cubes = {p: np.zeros(cube_shape) for p in cube_labels}
-    chunks = stars_only.split(chunk_stars)
+    chunks = own_smoothing_lengths(stars_only.split(chunk_stars))
     start, peaks = 0, []
     for k in range(n_chunks):
         chunk = chunks.pop(0)
@@ -603,7 +616,7 @@ def observe(job, snap, snap_number, sidx, out_dir):
         props["aperture_spectrum"] = "stars spread over their kernels (smoothed data cube)"
     elif APERTURE_SPECTRUM in ("points", "two_pass"):
         part_lnu = {p: 0.0 for p in STAR_LABELS}
-        chunks = stars_only.split(chunk_stars)
+        chunks = own_smoothing_lengths(stars_only.split(chunk_stars))
         start = 0
         while chunks:
             chunk = chunks.pop(0)

@@ -173,7 +173,9 @@ def test_smoothed_data_cube_matches_images_and_adds_up_in_chunks():
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=r"\s*Coordinates must be centered")
             cube.generate_data_cube_smoothed(Sed(lam, lnu=lnu[sel] * erg / s / Hz), coordinates=xyz[sel],
-                                             smoothing_lengths=sml[sel], kernel=kernel, kernel_threshold=1)
+                                             smoothing_lengths=sml[sel].copy(), kernel=kernel, kernel_threshold=1)
+        # .copy(): from 1.3.2 synthesizer converts the smoothing lengths it is given to its own units
+        # in place, which through a slice would change sml itself for the image below
         assert cube.units == erg / s / Hz
         return cube.arr
 
@@ -192,3 +194,28 @@ def test_smoothed_data_cube_matches_images_and_adds_up_in_chunks():
 
     chunks = cube_of(slice(0, 50)) + cube_of(slice(50, 90)) + cube_of(slice(90, None))
     np.testing.assert_allclose(chunks, everything, rtol=1e-12, atol=1e-12 * everything.max())
+
+
+def test_chunk_copies_keep_the_galaxys_smoothing_lengths():
+    """The large-galaxy notebook and the batch script give each chunk from synthesizer's `split`
+    its own copy of the smoothing lengths. The chunks' arrays are views of the galaxy's, and from
+    synthesizer 1.3.2 imaging converts the smoothing lengths it is given to kpc in place, which
+    through a view rescaled the galaxy's own values (a 500-star memory trial spread those stars'
+    light over the whole image). Imaging a chunk with its own copy must leave the galaxy unchanged."""
+    from astropy.cosmology import FlatLambdaCDM
+    from unyt import Myr, Msun, arcsec, kpc
+    from synthesizer.imaging.image_generators import _standardize_imaging_units
+    from synthesizer.particle import Galaxy, Stars
+
+    rng = np.random.default_rng(5)
+    n = 120
+    stars = Stars(initial_masses=np.full(n, 1e6) * Msun, ages=rng.uniform(1, 500, n) * Myr,
+                  metallicities=np.full(n, 0.01), coordinates=rng.normal(0, 1, (n, 3)) * kpc,
+                  smoothing_lengths=rng.uniform(0.05, 0.6, n) * kpc, redshift=6.0)
+    galaxy = Galaxy(stars=stars, redshift=6.0, centre=np.zeros(3) * kpc)
+    before = galaxy.stars.smoothing_lengths.to("kpc").value.copy()
+    chunk = galaxy.split(50)[0]
+    chunk.stars.smoothing_lengths = chunk.stars.smoothing_lengths.copy()
+    _standardize_imaging_units(0.03 * arcsec, 3.0 * arcsec, chunk.stars,
+                               cosmo=FlatLambdaCDM(H0=70.0, Om0=0.3), include_smoothing_lengths=True)
+    np.testing.assert_array_equal(galaxy.stars.smoothing_lengths.to("kpc").value, before)
